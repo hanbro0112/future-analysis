@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["skills/**/*.ts", "vitest.config.ts"]
+  "include": ["**/*.ts"]
 }

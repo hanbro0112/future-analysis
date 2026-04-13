@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "test:auto-commit": "vitest run skills/auto-commit/scripts"
+    "test:auto-commit": "vitest run auto-commit/scripts"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
