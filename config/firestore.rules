@@ -1,0 +1,11 @@
+// vscode/settings.json 設定文件格式 
+
+rules_version = '2'; 
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // // 預設拒絕所有寫入與讀取，確保安全
+    // match /{document=**} {
+    //   allow read, write: if false;
+    // }
+}
