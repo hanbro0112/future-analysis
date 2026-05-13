@@ -4,22 +4,14 @@ ROOT_DIR := justfile_directory()
 
 
 dev:
-    cd skills
-    pnpm install
-
-
-    firebase emulators:start
+    cd skills && pnpm install
+    docker compose up -d
+    cd apps/price-listener && uv sync && uv run main
 
 init:
     node --version
     npm --version
     pnpm --version
     just --version
-    npm install -g firebase-tools
-
-uv:
     powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-    cd apps/price-listener
-    uv sync
-    uv run main
-
+    npm install -g firebase-tools

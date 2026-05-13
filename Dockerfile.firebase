@@ -1,0 +1,19 @@
+FROM node:20-alpine
+
+# 安裝 Java (JRE) 是運行模擬器必須的
+RUN apk add --no-cache openjdk21-jre
+
+# 安裝 Firebase CLI
+RUN npm install -g firebase-tools
+
+WORKDIR /app
+
+# 預先下載模擬器檔案，避免每次啟動都重新下載
+RUN firebase setup:emulators:firestore
+RUN firebase setup:emulators:pubsub
+
+# 暴露常用的 Port
+# 4000: UI, 8080: Firestore, 8085: PubSub
+EXPOSE 4000 8080 8085
+
+CMD ["firebase", "emulators:start", "--project", "demo-project"]

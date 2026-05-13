@@ -4,23 +4,15 @@ import os
 import sys
 import time
 from pathlib import Path
-from dotenv import load_dotenv
 from datetime import datetime
 
-load_dotenv()
+from .config import config
 
 # 將 libs 目錄加入 Python path
 project_root = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(project_root))
 
 from libs.pubsub import PubSubPublisher
-
-config = {
-    "api_key": os.environ["API_KEY"],
-    "secret_key": os.environ["SECRET_KEY"],
-    "ca_cert_path": os.environ["CA_CERT_PATH"],
-    "ca_password": os.environ["CA_PASSWORD"],
-}
 
 # 初始化 Pub/Sub Publisher
 pubsub_publisher: PubSubPublisher | None = None
@@ -30,53 +22,41 @@ def init_pubsub():
     """初始化 Pub/Sub Publisher"""
     global pubsub_publisher
     
-    # 從環境變數讀取配置，預設使用 emulator
-    project_id = os.getenv("GCP_PROJECT_ID", "demo-project")
-    topic_id = os.getenv("PUBSUB_TOPIC_ID", "price-updates")
+    project_id = config["gcp_project_id"]
+    topic_id = config["pubsub_topic_id"]
     
     try:
         pubsub_publisher = PubSubPublisher(project_id=project_id)
-        # 確保 topic 存在
+        # 等待 topic 建立完成 - ensure_topic_exists() 是同步調用，會等待建立完成
         pubsub_publisher.ensure_topic_exists(topic_id)
         print(f"✅ Pub/Sub 初始化成功，Topic: {topic_id}")
     except Exception as e:
         print(f"⚠️  Pub/Sub 初始化失敗: {e}")
-        print(f"   將繼續運行，但不會發送訊息到 Pub/Sub")
-        pubsub_publisher = None
+        exit(1)
 
 
 def quote_callback(exchange: Exchange, tick: TickFOPv1):
     """處理報價回調，推送到 Pub/Sub"""
     print(f"Received tick from {exchange}: {tick}")
     
-    # 如果 Pub/Sub 已初始化，則發送訊息
-    if pubsub_publisher:
-        try:
-            topic_id = os.getenv("PUBSUB_TOPIC_ID", "price-updates")
-            
-            # 準備訊息資料
-            message_data = {
-                "symbol": tick.code,
-                "exchange": str(exchange),
-                "close": float(tick.close) if tick.close else None,
-                "volume": int(tick.volume) if tick.volume else None,
-                "bid_price": float(tick.bid_price) if tick.bid_price else None,
-                "ask_price": float(tick.ask_price) if tick.ask_price else None,
-                "bid_volume": int(tick.bid_volume) if tick.bid_volume else None,
-                "ask_volume": int(tick.ask_volume) if tick.ask_volume else None,
-                "timestamp": datetime.now().isoformat(),
-            }
-            
-            # 發布到 Pub/Sub
-            message_id = pubsub_publisher.publish_message(
-                topic_id=topic_id,
-                data=message_data,
-                source="price-listener"
-            )
-            print(f"📤 已發布到 Pub/Sub，訊息 ID: {message_id}")
-            
-        except Exception as e:
-            print(f"❌ 發送訊息到 Pub/Sub 失敗: {e}")
+    try:
+        topic_id = config["pubsub_topic_id"]
+        
+        # 準備訊息資料
+        message_data = {
+            "test": "這是一個測試訊息",
+        }
+        
+        # 發布到 Pub/Sub
+        message_id = pubsub_publisher.publish_message(
+            topic_id=topic_id,
+            data=message_data,
+            source="price-listener"
+        )
+        print(f"📤 已發布到 Pub/Sub，訊息 ID: {message_id}")
+        
+    except Exception as e:
+        print(f"❌ 發送訊息到 Pub/Sub 失敗: {e}")
 
 
 def check_usage(api: sj.Shioaji):
@@ -101,8 +81,7 @@ def check_usage(api: sj.Shioaji):
             
             print(f"📊 API 使用量報告")
             print(f"   已使用: {used_mb:.0f} MB ({used_percentage:.1f}%)")
-            print(f"   剩餘額度: {remaining_mb:.0f} MB ({remaining_percentage:.1f}%)")
-            print(f"   總額度: {limit_mb:.0f} MB")
+            print(f"   剩餘額度: {remaining_mb:.0f} MB ({remaining_percentage:.1f}%)\n")
             
             # 根據剩餘百分比顯示警告
             if remaining_percentage < 10:
@@ -117,10 +96,16 @@ def check_usage(api: sj.Shioaji):
 
 
 def main() -> None:
-    # 初始化 Pub/Sub
     init_pubsub()
     
     api = get_shioaji_client() 
+
+    check_usage(api)
+    
+    # 註冊回調函數 - 必須在訂閱之前設定
+    print("🔧 註冊報價回調函數...")
+    api.quote.set_on_tick_fop_v1_callback(quote_callback)
+    
     # TXF: 大台 MXF: 小台 R1: 熱門月(近月) 合約
     target_symbols = ["MXFR1"]
     
@@ -128,17 +113,16 @@ def main() -> None:
         # 取得合約物件並訂閱報價
         contract = api.Contracts.Futures[code]
         if contract:
-            print(f"Subscribing to {contract.code}...")
+            print(f"📡 正在訂閱 {contract.code} ({contract.name})...")
+            # 訂閱 Tick 報價（而非 Quote）以獲得即時更新
             api.quote.subscribe(
                 contract, 
-                quote_type = sj.constant.QuoteType.Quote,
+                quote_type = sj.constant.QuoteType.Tick,  # 改用 Tick
                 version = sj.constant.QuoteVersion.v1
             )
+            print(f"✅ 訂閱成功: {contract.code}")
         else:
-            print(f"Contract {code} not found.")
-
-    # 註冊回調函數
-    api.quote.set_on_tick_fop_v1_callback(quote_callback)
+            print(f"❌ 找不到合約: {code}")
     
     try:
         print("Listening for price updates... Press Ctrl+C to exit.")
