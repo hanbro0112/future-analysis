@@ -59,6 +59,63 @@ def quote_callback(exchange: Exchange, tick: TickFOPv1):
         print(f"❌ 發送訊息到 Pub/Sub 失敗: {e}")
 
 
+def main() -> None:
+    init_pubsub()
+    
+    api = get_shioaji_client() 
+    
+    # 註冊回調函數 - 必須在訂閱之前設定
+    print("🔧 註冊報價回調函數...")
+    api.quote.set_on_tick_fop_v1_callback(quote_callback)
+    
+    # TXF: 大台 MXF: 小台 R1: 熱門月(近月) 合約
+    target_symbols = ["MXFR1"]
+    
+    for code in target_symbols:
+        # 取得合約物件並訂閱報價
+        contract = api.Contracts.Futures[code]
+        if contract:
+            print(f"📡 正在訂閱 {contract.code} ({contract.name})...")
+            # 訂閱 Tick 報價（而非 Quote）以獲得即時更新
+            api.quote.subscribe(
+                contract, 
+                quote_type = sj.constant.QuoteType.Tick,  # 改用 Tick
+                version = sj.constant.QuoteVersion.v1
+            )
+            print(f"✅ 訂閱成功: {contract.code}")
+        else:
+            print(f"❌ 找不到合約: {code}")
+    
+    try:
+        print("Listening for price updates... Press Ctrl+C to exit.")
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Exiting...")
+        check_usage(api)
+
+
+def get_shioaji_client() -> sj.Shioaji:
+    """初始化並登入 Shioaji API"""
+    api = sj.Shioaji(simulation=True)
+    print("🔌 正在連接 Shioaji API...")
+    api.login(
+        api_key=config["api_key"],
+        secret_key=config["secret_key"],
+    )
+    
+    # ca 憑證放在專案根目錄
+    project_root = Path(__file__).resolve().parents[4]
+    ca_path = str(project_root / config["ca_cert_path"])
+    
+    api.activate_ca(
+        ca_path= ca_path,
+        ca_passwd=config["ca_password"]
+    )
+    print("✅ Shioaji API 登入成功")
+    return api
+
+
 def check_usage(api: sj.Shioaji):
     """檢查 API 使用量並顯示剩餘額度百分比"""
     try:
@@ -93,60 +150,3 @@ def check_usage(api: sj.Shioaji):
     except Exception as e:
         print(f"❌ 檢查使用量時發生錯誤: {e}")
         print(f"   原始資料: {usage}")
-
-
-def main() -> None:
-    init_pubsub()
-    
-    api = get_shioaji_client() 
-
-    check_usage(api)
-    
-    # 註冊回調函數 - 必須在訂閱之前設定
-    print("🔧 註冊報價回調函數...")
-    api.quote.set_on_tick_fop_v1_callback(quote_callback)
-    
-    # TXF: 大台 MXF: 小台 R1: 熱門月(近月) 合約
-    target_symbols = ["MXFR1"]
-    
-    for code in target_symbols:
-        # 取得合約物件並訂閱報價
-        contract = api.Contracts.Futures[code]
-        if contract:
-            print(f"📡 正在訂閱 {contract.code} ({contract.name})...")
-            # 訂閱 Tick 報價（而非 Quote）以獲得即時更新
-            api.quote.subscribe(
-                contract, 
-                quote_type = sj.constant.QuoteType.Tick,  # 改用 Tick
-                version = sj.constant.QuoteVersion.v1
-            )
-            print(f"✅ 訂閱成功: {contract.code}")
-        else:
-            print(f"❌ 找不到合約: {code}")
-    
-    try:
-        print("Listening for price updates... Press Ctrl+C to exit.")
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("Exiting...")
-
-
-def get_shioaji_client() -> sj.Shioaji:
-    api = sj.Shioaji(simulation=True)
-    print("Connecting to Shioaji API...")
-    api.login(
-        api_key=config["api_key"],
-        secret_key=config["secret_key"],
-    )
-    
-    # ca 憑證放在專案根目錄
-    project_root = Path(__file__).resolve().parents[4]
-    ca_path = str(project_root / config["ca_cert_path"])
-    
-    api.activate_ca(
-        ca_path= ca_path,
-        ca_passwd=config["ca_password"]
-    )
-    print("Shioaji API login and activate CA successfully.")
-    return api
