@@ -132,6 +132,15 @@ const result = await autoCommit({
   breaking: '舊的 token 端點已移除',
   issues: ['#123', '#456']
 })
+
+// 生成的 commit 訊息格式：
+// feat(auth): 新增 OAuth 登入
+//
+// 整合 Google 和 GitHub OAuth
+//
+// BREAKING CHANGE: 舊的 token 端點已移除
+//
+// Closes #123, #456
 ```
 
 ### 自動添加改動摘要
@@ -147,7 +156,6 @@ const result = await autoCommit({
 
 // 生成的 commit 訊息：
 // feat: 新增認證功能
-// 
 // - feat: src/auth.ts
 // - test: src/auth.test.ts
 // - docs: README.md

@@ -45,6 +45,42 @@ skills/auto-commit/
 - ✅ 支援 Issue 鏈接
 - ✅ 完整的錯誤碼系統 (E001-E007)
 - ✅ 前置條件檢查
+- ✅ **description 和 body 之間空一行**
+- ✅ **body 內條目之間不空行**：直接換行即可
+
+## 提交訊息格式規範
+
+### 基本格式
+
+```
+<type>(<scope>): <description>
+<body>
+
+BREAKING CHANGE: <breaking>
+
+Closes <issues>
+```
+
+### 規則
+
+1. **description 和 body 之間空一行**
+2. **body 內條目之間不空行**：直接換行即可
+3. **BREAKING CHANGE 和 Closes 前要空行**：用於區隔特殊標記
+4. **條目使用 `-` 開頭**：清單格式
+
+### 範例
+
+```
+feat(auth): 新增 OAuth 登入
+
+- 支援 Google OAuth
+- 支援 GitHub OAuth
+- 添加 JWT token 驗證
+
+BREAKING CHANGE: 舊的 token 端點已移除
+
+Closes #123, #456
+```
 
 ## 使用場景
 

@@ -123,7 +123,7 @@ export function generateCommitMessageWithChanges(input: AutoCommitInput, stagedF
   if (stagedFiles.length > 0) {
     const changes = generateChangesSummary(stagedFiles)
     if (changes.length > 0) {
-      message += `\n\n${changes.join('\n')}`
+      message += `\n${changes.join('\n')}`
     }
   }
 
