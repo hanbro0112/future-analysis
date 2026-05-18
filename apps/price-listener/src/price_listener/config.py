@@ -1,7 +1,13 @@
+"""配置模組"""
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# 載入根目錄的 .env
+root_dir = Path(__file__).resolve().parents[4]
+env_file = root_dir / '.env'
+if env_file.exists():
+    load_dotenv(env_file)
 
 config = {
     "api_key": os.environ["API_KEY"],
@@ -9,7 +15,7 @@ config = {
     "ca_cert_path": os.environ["CA_CERT_PATH"],
     "ca_password": os.environ["CA_PASSWORD"],
 
-    # 從環境變數讀取配置，預設使用 emulator
+    # GCP 配置
     "gcp_project_id": os.getenv("GCP_PROJECT_ID", "demo-project"),
     "pubsub_topic_id": os.getenv("PUBSUB_TOPIC_ID", "price-updates"),
 }

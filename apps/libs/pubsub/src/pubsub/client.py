@@ -4,10 +4,11 @@ Pub/Sub 客戶端模組
 """
 import os
 import json
-from typing import Callable, Optional, Any
+from typing import Callable, Optional
 from google.cloud import pubsub_v1
 from google.cloud.pubsub_v1.publisher import Client as PublisherClient
 from google.api_core.exceptions import AlreadyExists
+from concurrent.futures import TimeoutError
 
 
 def get_publisher_client(project_id: str = "demo-project") -> PublisherClient:
@@ -178,3 +179,88 @@ class PubSubPublisher:
         self.client.delete_topic(request={"topic": topic_path})
         self._topic_cache.discard(topic_id)
         print(f"🗑️  Topic 已刪除: {topic_path}")
+
+
+class PubSubSubscriber:
+    """Pub/Sub 訂閱者輔助類別"""
+    
+    def __init__(self, project_id: str, subscription_id: str):
+        """
+        初始化訂閱者
+        
+        Args:
+            project_id: GCP 專案 ID
+            subscription_id: 訂閱 ID
+        """
+        self.project_id = project_id
+        self.subscription_id = subscription_id
+        self.subscriber = pubsub_v1.SubscriberClient()
+        self.subscription_path = self.subscriber.subscription_path(
+            project_id, subscription_id
+        )
+        
+        if is_emulator_mode():
+            print(f"🔧 使用 Pub/Sub Emulator: {os.getenv('PUBSUB_EMULATOR_HOST')}")
+        else:
+            print(f"☁️  連接到正式 Pub/Sub 環境")
+    
+    def subscribe(
+        self,
+        callback: Callable[[dict], None],
+        timeout: Optional[float] = None
+    ) -> None:
+        """
+        訂閱訊息並處理
+        
+        Args:
+            callback: 處理訊息的回調函數，接收解析後的訊息資料
+            timeout: 超時時間（秒），None 表示永久運行
+        """
+        def message_callback(message: pubsub_v1.subscriber.message.Message) -> None:
+            """處理接收到的訊息"""
+            try:
+                # 解析訊息資料
+                data = json.loads(message.data.decode('utf-8'))
+                
+                print(f"📨 收到訊息 ID: {message.message_id}")
+                
+                # 呼叫使用者提供的回調函數
+                callback(data)
+                
+                # 確認訊息已處理
+                message.ack()
+                print(f"✅ 訊息已確認: {message.message_id}")
+                
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON 解析錯誤: {e}")
+                message.nack()
+            except Exception as e:
+                print(f"❌ 處理訊息時發生錯誤: {e}")
+                message.nack()
+        
+        print(f"🎧 開始監聽訂閱: {self.subscription_path}")
+        
+        # 建立串流拉取
+        streaming_pull_future = self.subscriber.subscribe(
+            self.subscription_path,
+            callback=message_callback
+        )
+        
+        try:
+            # 等待訊息（阻塞式）
+            streaming_pull_future.result(timeout=timeout)
+        except TimeoutError:
+            streaming_pull_future.cancel()
+            print(f"⏰ 訂閱已超時")
+        except KeyboardInterrupt:
+            streaming_pull_future.cancel()
+            print(f"\n🛑 訂閱已停止")
+        except Exception as e:
+            streaming_pull_future.cancel()
+            print(f"❌ 訂閱發生錯誤: {e}")
+            raise
+    
+    def close(self) -> None:
+        """關閉訂閱者連線"""
+        self.subscriber.close()
+        print("🔌 訂閱者連線已關閉")

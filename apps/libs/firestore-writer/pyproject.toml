@@ -1,0 +1,9 @@
+[project]
+name = "firestore-writer"
+version = "0.1.0"
+description = "GCP Firestore 寫入模組 - 提供文件寫入和批次操作功能"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "google-cloud-firestore>=2.27.0",
+]

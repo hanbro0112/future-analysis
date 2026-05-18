@@ -1,0 +1,9 @@
+[tool.uv.workspace]
+members = [
+    "price-analyzer",
+    "price-listener",
+    "libs/pubsub",
+    "libs/firestore-writer",
+]
+
+[tool.uv.sources]

@@ -1,18 +1,10 @@
 import shioaji as sj
 from shioaji import TickFOPv1, Exchange
-import os
-import sys
 import time
-from pathlib import Path
 from datetime import datetime
 
 from .config import config
-
-# 將 libs 目錄加入 Python path
-project_root = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(project_root))
-
-from libs.pubsub import PubSubPublisher
+from pubsub import PubSubPublisher
 
 # 初始化 Pub/Sub Publisher
 pubsub_publisher: PubSubPublisher | None = None

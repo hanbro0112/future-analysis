@@ -7,6 +7,7 @@ yarn.lock
 # uv
 .venv/
 __pycache__/
+*.egg-info/
 
 # Logs
 *.log
