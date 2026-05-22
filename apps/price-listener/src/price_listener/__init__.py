@@ -1,9 +1,11 @@
+import sys
 import shioaji as sj
 from shioaji import TickFOPv1, Exchange
 import time
-from datetime import datetime
+from pathlib import Path
 
-from .config import config
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # 添加 apps 目錄到 Python 路徑
+from config import config
 from pubsub import PubSubPublisher
 
 # 初始化 Pub/Sub Publisher
@@ -142,3 +144,6 @@ def check_usage(api: sj.Shioaji):
     except Exception as e:
         print(f"❌ 檢查使用量時發生錯誤: {e}")
         print(f"   原始資料: {usage}")
+
+
+__all__ = ["main"]

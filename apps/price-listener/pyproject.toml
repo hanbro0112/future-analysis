@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [tool.uv.scripts]
-price-listener = "main:main"
+start = "python main.py"
 
 [tool.uv.sources]
 pubsub = { workspace = true }

@@ -29,3 +29,6 @@ coverage/
 
 # 永豐 CA 憑證
 Sinopac.pfx
+
+# Firebase emulator saved data
+saved-data/

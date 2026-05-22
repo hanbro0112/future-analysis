@@ -4,10 +4,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # 載入根目錄的 .env
-root_dir = Path(__file__).resolve().parents[4]
+root_dir = Path(__file__).resolve().parents[1]
 env_file = root_dir / '.env'
 if env_file.exists():
     load_dotenv(env_file)
+else:
+    print(f"⚠️  配置文件不存在: {env_file}")
 
 config = {
     "api_key": os.environ["API_KEY"],

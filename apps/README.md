@@ -7,6 +7,7 @@
 ```
 apps/
 ├── pyproject.toml           # Workspace 配置
+├── config.py                # 環境變數配置
 ├── libs/                    # 共享程式庫
 │   ├── pubsub/             # Pub/Sub 客戶端模組
 │   │   ├── pyproject.toml
@@ -28,14 +29,12 @@ apps/
 │   └── src/
 │       └── price_analyzer/
 │           ├── __init__.py
-│           └── config.py
 └── price-listener/          # 價格監聽服務
     ├── main.py             # 啟動入口
     ├── pyproject.toml      # Package 配置
     └── src/
         └── price_listener/
             ├── __init__.py
-            └── config.py
 ```
 
 ## 安裝依賴
@@ -82,7 +81,6 @@ uv run python main.py
 ```bash
 GCP_PROJECT_ID=demo-project
 PUBSUB_SUBSCRIPTION_ID=price-subscription
-FIRESTORE_COLLECTION=prices
 
 # Emulator 配置（開發環境）
 PUBSUB_EMULATOR_HOST=localhost:8085

@@ -6,7 +6,11 @@ ROOT_DIR := justfile_directory()
 dev:
     cd skills && pnpm install
     docker compose up -d
-    cd apps/price-listener && uv sync && uv run main
+    cd apps && uv sync && uv run main
+
+tmp:
+    cd apps && uv sync --package price-listener && uv run --package price-listener python -m price-listener.main
+    cd apps && uv sync --package price-analyzer && uv run --package price-analyzer python -m price-analyzer.main
 
 init:
     node --version

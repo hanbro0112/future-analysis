@@ -30,15 +30,15 @@
 - 每個新函數或邏輯變更都應提供對應的測試案例（使用 Jest）。
 
 ## Commit Guidelines
-- 每個 commit 必須在獨立的 worktree 分支上執行
+<!-- - 每個 commit 必須在獨立的 worktree 分支上執行 -->
 - 遵循 Conventional Commits 規範
 - commit 訊息格式：`{type}({scope}): {description}`
 
-## Safety Measures
+<!-- ## Safety Measures
 - **強制**：永遠在 worktree 上工作，禁止直接在主線上修改檔案
 - 使用單獨的 worktree 而非 `git stash`，保持工作目錄整潔供 AI 掃描
 - 提議小的、可審查的提交，而非一次巨大的重構
-- 每個 worktree 完成後必須清理，避免多餘的分支堆積
+- 每個 worktree 完成後必須清理，避免多餘的分支堆積 -->
 
 ## Skills Guidelines
 - 使用 `skills/_template` 作為新技能的基礎模板，確保每個技能都有清晰的 `SKILL.md` 說明。
