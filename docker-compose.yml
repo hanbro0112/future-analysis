@@ -16,5 +16,5 @@ services:
     command: >
       firebase emulators:start 
       --project demo-project 
-      --import=./saved-data 
-      --export-on-exit=./saved-data
+      --import=/app/saved-data/exp
+      --export-on-exit=/app/saved-data/exp

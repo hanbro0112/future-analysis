@@ -19,10 +19,43 @@ def main():
             project_id=config['gcp_project_id']
         )
         
+        topic_id = config['pubsub_topic_id']
+        subscription_id = config['pubsub_subscription_id']
+        project_id = config['gcp_project_id']
+        
+        # 確保 Topic 存在（若無則自動創建）
+        from google.cloud.pubsub_v1 import PublisherClient, SubscriberClient
+        publisher_client = PublisherClient()
+        topic_path = publisher_client.topic_path(project_id, topic_id)
+        
+        try:
+            publisher_client.get_topic(request={"topic": topic_path})
+            print(f"✅ Topic 已存在: {topic_id}")
+        except Exception:
+            publisher_client.create_topic(request={"name": topic_path})
+            print(f"✅ Topic 已創建: {topic_id}")
+        
+        # 確保 Subscription 存在並綁定到 Topic
+        subscriber_client = SubscriberClient()
+        subscription_path = subscriber_client.subscription_path(project_id, subscription_id)
+        topic_path = f"projects/{project_id}/topics/{topic_id}"
+        
+        try:
+            subscriber_client.get_subscription(request={"subscription": subscription_path})
+            print(f"✅ Subscription 已存在: {subscription_id}")
+        except Exception:
+            try:
+                subscriber_client.create_subscription(
+                    request={"name": subscription_path, "topic": topic_path}
+                )   
+                print(f"✅ Subscription 已創建並綁定到 Topic: {subscription_id} -> {topic_id}")
+            except Exception as e:
+                print(f"⚠️  創建 Subscription 失敗: {e}")
+        
         # 初始化 Pub/Sub Subscriber
         subscriber = PubSubSubscriber(
-            project_id=config['gcp_project_id'],
-            subscription_id=config['pubsub_topic_id']
+            project_id=project_id,
+            subscription_id=subscription_id
         )
         
         # 定義訊息處理函數
@@ -41,6 +74,7 @@ def main():
             except Exception as e:
                 print(f"❌ 處理資料時發生錯誤: {e}\n")
                 raise
+                # 不 raise，讓訊息可以被標記為失敗並繼續處理下一個訊息
         
         # 開始訂閱（阻塞式運行）
         print("🚀 Price Analyzer 已啟動\n")
