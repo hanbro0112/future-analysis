@@ -32,13 +32,35 @@ def init_pubsub():
 def quote_callback(exchange: Exchange, tick: TickFOPv1):
     """處理報價回調，推送到 Pub/Sub"""
     print(f"Received tick from {exchange}: {tick}")
+
+    if tick.simtrade:
+        print("⚠️  試撮交易資料，跳過處理")
+        return
     
     try:
         topic_id = config["pubsub_topic_id"]
         
-        # 準備訊息資料
+        # 準備訊息資料 - 展開 tick 物件的各個欄位
         message_data = {
-            "test": "這是一個測試訊息",
+            "code": tick.code,
+            "datetime": tick.datetime.isoformat() if tick.datetime else None,
+            "open": str(tick.open) if tick.open is not None else None,
+            "underlying_price": str(tick.underlying_price) if tick.underlying_price is not None else None,
+            "bid_side_total_vol": tick.bid_side_total_vol,
+            "ask_side_total_vol": tick.ask_side_total_vol,
+            "avg_price": str(tick.avg_price) if tick.avg_price is not None else None,
+            "close": str(tick.close) if tick.close is not None else None,
+            "high": str(tick.high) if tick.high is not None else None,
+            "low": str(tick.low) if tick.low is not None else None,
+            "amount": str(tick.amount) if tick.amount is not None else None,
+            "total_amount": str(tick.total_amount) if tick.total_amount is not None else None,
+            "volume": tick.volume,
+            "total_volume": tick.total_volume,
+            "tick_type": tick.tick_type,
+            "chg_type": tick.chg_type,
+            "price_chg": str(tick.price_chg) if tick.price_chg is not None else None,
+            "pct_chg": str(tick.pct_chg) if tick.pct_chg is not None else None,
+            "simtrade": tick.simtrade,
         }
         
         # 發布到 Pub/Sub
