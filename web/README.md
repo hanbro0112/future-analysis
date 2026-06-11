@@ -174,19 +174,6 @@ pnpm build
 pnpm start
 ```
 
-### 部署到 Vercel
-
-最簡單的部署方式是使用 [Vercel Platform](https://vercel.com/new)：
-
-1. 將專案推送到 GitHub
-2. 在 Vercel 匯入專案
-3. 設定環境變數（與 `.env.local` 相同）
-4. 部署完成
-
-詳細說明請參考 [Next.js 部署文件](https://nextjs.org/docs/app/building-your-application/deploying)。
-
----
-
 ## 📚 學習資源
 
 - [Next.js 官方文件](https://nextjs.org/docs) - 學習 Next.js 功能和 API
