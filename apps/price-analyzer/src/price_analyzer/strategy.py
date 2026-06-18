@@ -218,6 +218,9 @@ class LongShortAnalyzer:
         # 當天所有 Tick (用於計算平均)
         self.today_ticks: List[TickData] = []
         self.current_date: Optional[datetime] = None
+        
+        # 儲存最新的分析結果
+        self.latest_analysis: Optional[LongShortRatio] = None
     
     def add_tick(self, tick: TickData):
         """添加新的 Tick 資料"""
@@ -599,7 +602,8 @@ class LongShortAnalyzer:
             volume_indicator, basis_analysis
         )
         
-        return LongShortRatio(
+        # 建立分析結果
+        result = LongShortRatio(
             timestamp=latest_tick.datetime,
             window_1min=window_1min,
             window_5min=window_5min,
@@ -612,6 +616,15 @@ class LongShortAnalyzer:
             signal=signal,
             confidence=confidence
         )
+        
+        # 儲存最新的分析結果
+        self.latest_analysis = result
+        
+        return result
+    
+    def get_latest_analysis(self) -> Optional[LongShortRatio]:
+        """取得最新的分析結果"""
+        return self.latest_analysis
     
     def format_analysis(self, result: LongShortRatio) -> str:
         """格式化分析結果為可讀文字"""
