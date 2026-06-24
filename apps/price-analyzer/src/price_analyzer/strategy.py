@@ -58,6 +58,7 @@ class TimeWindowStats:
             self.open_price = tick.close
         
         # 更新收盤價
+        prev_close = self.close_price
         self.close_price = tick.close
         
         # 更新最高最低價
@@ -66,13 +67,36 @@ class TimeWindowStats:
         if self.low_price is None or tick.close < self.low_price:
             self.low_price = tick.close
         
-        # 根據內外盤分類
-        if tick.tick_type == 1:  # 外盤 (買進)
+        # 判斷內外盤
+        tick_type = tick.tick_type
+        
+        # 當 tick_type 為 0（無法判定）時，根據價格變動推測
+        if tick_type == 0 and prev_close is not None:
+            if tick.close > prev_close:
+                tick_type = 1  # 價格上漲，推測為外盤（買進）
+            elif tick.close < prev_close:
+                tick_type = 2  # 價格下跌，推測為內盤（賣出）
+            else:
+                # 價格不變，均分到買賣雙方
+                self.buy_volume += tick.volume // 2
+                self.sell_volume += tick.volume - (tick.volume // 2)
+                self.buy_amount += tick.amount / 2
+                self.sell_amount += tick.amount / 2
+                return
+        
+        # 根據判定的內外盤分類
+        if tick_type == 1:  # 外盤 (買進)
             self.buy_volume += tick.volume
             self.buy_amount += tick.amount
-        elif tick.tick_type == 2:  # 內盤 (賣出)
+        elif tick_type == 2:  # 內盤 (賣出)
             self.sell_volume += tick.volume
             self.sell_amount += tick.amount
+        else:
+            # 仍無法判定，均分
+            self.buy_volume += tick.volume // 2
+            self.sell_volume += tick.volume - (tick.volume // 2)
+            self.buy_amount += tick.amount / 2
+            self.sell_amount += tick.amount / 2
     
     @property
     def buy_sell_ratio(self) -> float:
@@ -259,7 +283,9 @@ class LongShortAnalyzer:
     def _calculate_window_stats(self, ticks: deque, duration_minutes: int) -> TimeWindowStats:
         """計算時間視窗統計資料"""
         stats = TimeWindowStats(duration_minutes=duration_minutes)
-        for tick in ticks:
+        # 創建副本以避免迭代時 deque 被修改（並發安全）
+        ticks_snapshot = list(ticks)
+        for tick in ticks_snapshot:
             stats.add_tick(tick)
         return stats
     
@@ -269,13 +295,16 @@ class LongShortAnalyzer:
         if not self.today_ticks or len(self.today_ticks) < 2:
             avg_volume = current_volume
         else:
+            # 創建快照以避免並發問題
+            today_snapshot = list(self.today_ticks)
+            
             # 計算時間範圍
-            time_span = (self.today_ticks[-1].datetime - self.today_ticks[0].datetime).total_seconds() / 60
+            time_span = (today_snapshot[-1].datetime - today_snapshot[0].datetime).total_seconds() / 60
             if time_span < 1:
                 time_span = 1
             
             # 總成交量 / 時間 = 每分鐘平均成交量
-            total_vol = sum(tick.volume for tick in self.today_ticks)
+            total_vol = sum(tick.volume for tick in today_snapshot)
             avg_volume = total_vol / time_span
         
         # 計算爆量比率

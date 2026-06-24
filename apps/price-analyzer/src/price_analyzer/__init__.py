@@ -171,7 +171,7 @@ def main():
                 print(f"⚠️  跳過無效資料：價格或成交量為 0")
                 return
             
-            print(f"📊 收到 Tick: {data.get('code', 'N/A')} @ {data.get('close', 'N/A')} (Vol: {data.get('volume', 0)})")
+            print(f"📊 收到 Tick: {data.get('code', 'N/A')} @ {data.get('close', 'N/A')}")
             
             try:
                 # 轉換為 TickData 物件
@@ -181,9 +181,11 @@ def main():
                 analysis_result = analyzer.analyze(tick)
                 
                 if analysis_result:
-                    # 顯示即時分析結果
+                    # 顯示即時分析結果（包含視窗統計）
+                    window_1m = analysis_result.window_1min
                     print(f"   🎯 {analysis_result.signal} | "
-                          f"多:{analysis_result.long_ratio:.1f}% 空:{analysis_result.short_ratio:.1f}%")
+                          f"多:{analysis_result.long_ratio:.1f}% 空:{analysis_result.short_ratio:.1f}% | "
+                          f"買:{window_1m.buy_volume} 賣:{window_1m.sell_volume} ")
                 
                 # 加入分鐘聚合器
                 completed_bar = aggregator.add_tick(tick)
