@@ -1,6 +1,6 @@
 'use client'
 
-import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Customized } from 'recharts'
 import type { MinuteChartPoint, AnalysisResult } from '../types/minuteData'
 
 interface MinuteChartProps {
@@ -204,15 +204,58 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
   const maxVolume = hasData ? Math.max(...normalizedData.map(d => d.volume)) : 1000;
   const avgVolume = hasData ? normalizedData.reduce((sum, d) => sum + d.volume, 0) / normalizedData.length : 1000;
 
-  // 決定線條顏色：根據成交量決定（藍色 -> 黃色 -> 紅色）
-  let lineColor: string;
-  if (hasData && normalizedData.length > 0) {
-    // 使用最新一筆資料的成交量
-    const latestVolume = normalizedData[normalizedData.length - 1].volume;
-    const volumeRatio = latestVolume / avgVolume;
-    lineColor = getVolumeColor(volumeRatio);
-  } else {
-    lineColor = '#3b82f6'; // 預設藍色
+  const chartDataWithColor = chartData.map(point => {
+    if (point.avg_price === null || point.volume === 0) {
+      return { ...point, color: '#3b82f6' }
+    }
+
+    const volumeRatio = point.volume / avgVolume
+    return { ...point, color: getVolumeColor(volumeRatio) }
+  })
+
+  // 自定義渲染分段線條的組件
+  const CustomSegmentedLine = (props: any) => {
+    const { xAxisMap, yAxisMap, dataKey, data } = props
+    
+    if (!xAxisMap || !yAxisMap || !data) return null
+    
+    const xAxis = xAxisMap[0]
+    const yAxis = yAxisMap['price']
+    
+    if (!xAxis || !yAxis) return null
+    
+    const paths: JSX.Element[] = []
+    
+    for (let i = 0; i < data.length - 1; i++) {
+      const current = data[i]
+      const next = data[i + 1]
+      
+      // 只有當兩個點都有有效數據時才繪製線段
+      if (current.avg_price !== null && next.avg_price !== null) {
+        const x1 = xAxis.scale(current.time) + (xAxis.bandwidth ? xAxis.bandwidth() / 2 : 0)
+        const y1 = yAxis.scale(current.avg_price)
+        const x2 = xAxis.scale(next.time) + (xAxis.bandwidth ? xAxis.bandwidth() / 2 : 0)
+        const y2 = yAxis.scale(next.avg_price)
+        
+        // 使用終點的顏色
+        const color = next.color
+        
+        paths.push(
+          <line
+            key={`segment-${i}`}
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke={color}
+            strokeWidth={2}
+            opacity={0.7}
+          />
+        )
+      }
+    }
+    
+    return <g>{paths}</g>
   }
 
   return (
@@ -225,7 +268,7 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
       </div>
       
       <ResponsiveContainer width="100%" height={400}>
-        <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 30 }}>
+        <ComposedChart data={chartDataWithColor} margin={{ top: 10, right: 10, left: 0, bottom: 30 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
           
           {/* X 軸：時間（只在整點顯示標籤） */}
@@ -318,19 +361,8 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
             connectNulls={false}
           />
           
-          {/* 平均價線（主線，根據市場情緒顯示顏色，台灣風格） */}
-          <Line 
-            yAxisId="price"
-            type="monotone" 
-            dataKey="avg_price" 
-            stroke={lineColor}
-            strokeWidth={2}
-            dot={false}
-            activeDot={{ r: 4, fill: lineColor, strokeWidth: 2, stroke: '#fff' }}
-            hide={false}
-            connectNulls={false}
-            opacity={0.7}
-          />
+          {/* 平均價線（自定義分段渲染，每段用終點節點顏色） */}
+          <Customized component={CustomSegmentedLine} data={chartDataWithColor} dataKey="avg_price" />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

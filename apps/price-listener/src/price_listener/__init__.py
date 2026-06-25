@@ -20,7 +20,8 @@ def init_pubsub():
     topic_id = config["pubsub_topic_id"]
     
     try:
-        pubsub_publisher = PubSubPublisher(project_id=project_id)
+        # 啟用訊息排序以確保同一商品的 tick 按順序處理
+        pubsub_publisher = PubSubPublisher(project_id=project_id, enable_message_ordering=True)
         # 等待 topic 建立完成 - ensure_topic_exists() 是同步調用，會等待建立完成
         pubsub_publisher.ensure_topic_exists(topic_id)
         print(f"✅ Pub/Sub 初始化成功，Topic: {topic_id}")
@@ -31,8 +32,8 @@ def init_pubsub():
 
 def quote_callback(exchange: Exchange, tick: TickFOPv1):
     """處理報價回調，推送到 Pub/Sub"""
-    print(f"Received tick from {exchange}: {tick}")
-
+    print(f"📊 Tick: {tick.code} @ {tick.close} Vol:{tick.volume} Time:{tick.datetime.strftime('%H:%M:%S.%f')[:-3]}")
+    
     if tick.simtrade:
         print("⚠️  試撮交易資料，跳過處理")
         return
@@ -63,13 +64,14 @@ def quote_callback(exchange: Exchange, tick: TickFOPv1):
             "simtrade": tick.simtrade,
         }
         
-        # 發布到 Pub/Sub
+        # 發布到 Pub/Sub（使用商品代碼作為 ordering key 確保順序）
         message_id = pubsub_publisher.publish_message(
             topic_id=topic_id,
             data=message_data,
+            ordering_key=tick.code,  # 使用商品代碼確保同一商品的訊息按順序處理
             source="price-listener"
         )
-        print(f"📤 已發布到 Pub/Sub，訊息 ID: {message_id}")
+        print(f"   ✅ 已發布 (ID: {message_id[:8]}...)\n")
         
     except Exception as e:
         print(f"❌ 發送訊息到 Pub/Sub 失敗: {e}")

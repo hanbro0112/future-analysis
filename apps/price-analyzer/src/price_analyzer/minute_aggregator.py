@@ -97,6 +97,13 @@ class MinuteAggregator:
         # 取得分鐘時間戳（對齊到分鐘）
         minute_timestamp = tick.datetime.replace(second=0, microsecond=0)
         
+        # 檢查時間順序 - 如果時間倒退且該分鐘已經完成，跳過該 tick
+        if self.last_minute is not None and minute_timestamp < self.last_minute:
+            print(f"⚠️  時間倒退！上一分鐘: {self.last_minute.strftime('%H:%M')}, "
+                  f"當前分鐘: {minute_timestamp.strftime('%H:%M')} "
+                  f"(Tick時間: {tick.datetime.strftime('%H:%M:%S')}) - 跳過處理")
+            return None  # 跳過該 tick
+        
         # 判斷是否需要完成上一分鐘
         completed_bar = None
         if self.last_minute is not None and minute_timestamp > self.last_minute:
@@ -104,6 +111,10 @@ class MinuteAggregator:
             for key in list(self.current_bars.keys()):
                 _, bar_minute = key
                 if bar_minute < minute_timestamp:
+                    bar_data = self.current_bars.get(key)
+                    tick_count = bar_data['tick_count'] if bar_data else 0
+                    print(f"✅ 完成分鐘 {bar_minute.strftime('%H:%M')} "
+                          f"(共 {tick_count} 筆 Tick, 成交量: {bar_data['volume'] if bar_data else 0})")
                     completed_bar = self._finalize_bar(key)
                     if self.on_minute_complete and completed_bar:
                         self.on_minute_complete(completed_bar)
@@ -136,6 +147,7 @@ class MinuteAggregator:
         
         # 更新資料
         bar_data = self.current_bars[key]
+        old_volume = bar_data['volume']
         bar_data['close'] = tick.close
         bar_data['high'] = max(bar_data['high'], tick.close)
         bar_data['low'] = min(bar_data['low'], tick.close)
@@ -144,6 +156,10 @@ class MinuteAggregator:
         bar_data['tick_count'] += 1
         bar_data['bid_total_vol'] = tick.bid_side_total_vol
         bar_data['ask_total_vol'] = tick.ask_side_total_vol
+        
+        print(f"   ➕ 分鐘 {minute_timestamp.strftime('%H:%M')} 累積: "
+              f"{old_volume} + {tick.volume} = {bar_data['volume']} "
+              f"(共 {bar_data['tick_count']} 筆)")
         
         # 內外盤統計
         if tick.tick_type == 1:  # 外盤 (買進)
