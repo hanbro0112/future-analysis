@@ -17,7 +17,7 @@ const CustomTooltip = ({ active, payload }: any) => {
     const data = payload[0].payload
     
     // 如果該時段沒有資料，不顯示 tooltip
-    if (data.avg_price === null || data.volume === null) {
+    if (data.avg_price === null) {
       return null;
     }
     
@@ -81,8 +81,8 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
     };
   });
 
-  // 生成完整的時間範圍（固定範圍，所有分鐘）
-  const generateFullTimeRange = (): string[] => {
+  // 生成完整的時間範圍（固定範圍）
+  const generateFullTimeRange = () => {
     const times: string[] = [];
     
     if (marketType === 'regular') {
@@ -91,7 +91,7 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
         const startMin = h === 8 ? 45 : 0;
         const endMin = h === 13 ? 45 : 59;
         for (let m = startMin; m <= endMin; m++) {
-          times.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+          times.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
         }
       }
     } else {
@@ -99,13 +99,13 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
       // 15:00 - 23:59
       for (let h = 15; h <= 23; h++) {
         for (let m = 0; m <= 59; m++) {
-          times.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+          times.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
         }
       }
       // 00:00 - 05:00
       for (let h = 0; h <= 5; h++) {
         for (let m = 0; m <= 59; m++) {
-          times.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+          times.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
         }
       }
     }
@@ -115,22 +115,20 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
 
   const fullTimeRange = generateFullTimeRange();
 
-  // 將實際資料合併到完整時間範圍中
+  // 建立資料查找表
   const dataMap = new Map(normalizedData.map(item => [item.time, item]));
-  const chartData: (MinuteChartPoint | { time: string; avg_price: null; high: null; low: null; volume: null; buy_volume: null; sell_volume: null })[] = fullTimeRange.map(time => {
-    const existingData = dataMap.get(time);
-    if (existingData) {
-      return existingData;
-    }
-    // 沒有資料的時間點，填充 null
-    return {
+
+  // 填充完整時間範圍的資料（沒有資料的時段設為 null）
+  const chartData = fullTimeRange.map(time => {
+    const dataPoint = dataMap.get(time);
+    return dataPoint || {
       time,
-      avg_price: null,
-      high: null,
-      low: null,
-      volume: null,
-      buy_volume: null,
-      sell_volume: null
+      avg_price: null as number | null,
+      high: null as number | null,
+      low: null as number | null,
+      volume: 0,
+      buy_volume: 0,
+      sell_volume: 0
     };
   });
 
@@ -160,8 +158,8 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
   if (hasData) {
     console.log('📊 MinuteChart Debug:', {
       原始資料筆數: data.length,
-      完整時間範圍: fullTimeRange.length,
-      有資料的時間點: normalizedData.length,
+      完整時間範圍: chartData.length,
+      有效資料點: chartData.filter(d => d.avg_price !== null).length,
       時間範例: chartData.slice(0, 5).map(d => d.time),
       整點刻度: hourTicks
     });

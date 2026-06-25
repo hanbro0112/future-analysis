@@ -390,7 +390,7 @@ export default function Home() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
               {/* 左側：報價卡片 */}
               <div className="lg:col-span-1">
-                {quote && <QuoteCard quote={quote} analysis={latestAnalysis} />}
+                <QuoteCard quote={quote} analysis={latestAnalysis} />
               </div>
 
               {/* 右側：分鐘級走勢圖 */}

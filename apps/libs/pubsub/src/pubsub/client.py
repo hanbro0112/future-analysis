@@ -4,9 +4,11 @@ Pub/Sub 客戶端模組
 """
 import os
 import json
+import time
 from typing import Callable, Optional
 from google.cloud import pubsub_v1
 from google.cloud.pubsub_v1.publisher import Client as PublisherClient
+from google.cloud.pubsub_v1.types import FlowControl
 from google.api_core.exceptions import AlreadyExists
 from concurrent.futures import TimeoutError
 
@@ -207,14 +209,18 @@ class PubSubSubscriber:
     def subscribe(
         self,
         callback: Callable[[dict], None],
-        timeout: Optional[float] = None
+        timeout: Optional[float] = None,
+        max_retries: int = 5,
+        retry_delay: int = 5
     ) -> None:
         """
-        訂閱訊息並處理
+        訂閱訊息並處理（含自動重連機制）
         
         Args:
             callback: 處理訊息的回調函數，接收解析後的訊息資料
             timeout: 超時時間（秒），None 表示永久運行
+            max_retries: 最大重試次數（0 表示無限重試）
+            retry_delay: 重試延遲時間（秒）
         """
         def message_callback(message: pubsub_v1.subscriber.message.Message) -> None:
             """處理接收到的訊息"""
@@ -238,27 +244,86 @@ class PubSubSubscriber:
                 print(f"❌ 處理訊息時發生錯誤: {e}")
                 message.nack()
         
-        print(f"🎧 開始監聽訂閱: {self.subscription_path}")
-        
-        # 建立串流拉取
-        streaming_pull_future = self.subscriber.subscribe(
-            self.subscription_path,
-            callback=message_callback
+        # 配置 Flow Control 以避免資源耗盡
+        flow_control = FlowControl(
+            max_messages=100,  # 同時處理的最大訊息數
+            max_bytes=10 * 1024 * 1024,  # 10 MB
         )
         
-        try:
-            # 等待訊息（阻塞式）
-            streaming_pull_future.result(timeout=timeout)
-        except TimeoutError:
-            streaming_pull_future.cancel()
-            print(f"⏰ 訂閱已超時")
-        except KeyboardInterrupt:
-            streaming_pull_future.cancel()
-            print(f"\n🛑 訂閱已停止")
-        except Exception as e:
-            streaming_pull_future.cancel()
-            print(f"❌ 訂閱發生錯誤: {e}")
-            raise
+        retry_count = 0
+        while True:
+            try:
+                print(f"🎧 開始監聽訂閱: {self.subscription_path}")
+                
+                # 建立串流拉取（含 flow control）
+                streaming_pull_future = self.subscriber.subscribe(
+                    self.subscription_path,
+                    callback=message_callback,
+                    flow_control=flow_control
+                )
+                
+                # 重置重試計數器（成功連線）
+                retry_count = 0
+                
+                # 等待訊息（阻塞式）
+                streaming_pull_future.result(timeout=timeout)
+                
+                # 正常結束（timeout）
+                break
+                
+            except TimeoutError:
+                streaming_pull_future.cancel()
+                print(f"⏰ 訂閱已超時")
+                break
+                
+            except KeyboardInterrupt:
+                streaming_pull_future.cancel()
+                print(f"\n🛑 訂閱已停止")
+                break
+                
+            except Exception as e:
+                error_msg = str(e)
+                
+                # 取消當前串流
+                try:
+                    streaming_pull_future.cancel()
+                except:
+                    pass
+                
+                # 檢查是否為可重試的錯誤
+                is_retryable = (
+                    "RST_STREAM" in error_msg or
+                    "499" in error_msg or
+                    "503" in error_msg or
+                    "UNAVAILABLE" in error_msg or
+                    "DEADLINE_EXCEEDED" in error_msg
+                )
+                
+                if not is_retryable:
+                    print(f"❌ 訂閱發生不可重試的錯誤: {e}")
+                    raise
+                
+                # 執行重試邏輯
+                retry_count += 1
+                
+                if max_retries > 0 and retry_count > max_retries:
+                    print(f"❌ 已達最大重試次數 ({max_retries})，停止訂閱")
+                    raise
+                
+                print(f"⚠️  訂閱發生錯誤: {e}")
+                print(f"🔄 將在 {retry_delay} 秒後重試... (第 {retry_count} 次)")
+                
+                # 延遲後重試
+                time.sleep(retry_delay)
+                
+                # 重新建立訂閱者客戶端
+                try:
+                    self.subscriber.close()
+                except:
+                    pass
+                
+                self.subscriber = pubsub_v1.SubscriberClient()
+                print(f"🔌 已重新建立訂閱者連線")
     
     def close(self) -> None:
         """關閉訂閱者連線"""

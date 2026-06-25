@@ -10,7 +10,7 @@ import type { AnalysisResult } from '../types/minuteData';
 
 interface QuoteCardProps {
   /** 報價資料 */
-  quote: TaifexQuote;
+  quote: TaifexQuote | null;
   /** 分析結果 */
   analysis?: AnalysisResult | null;
 }
@@ -54,6 +54,59 @@ function getSignalColor(signal: string): string {
 }
 
 export default function QuoteCard({ quote, analysis }: QuoteCardProps) {
+  // 無資料時顯示空框架
+  if (!quote) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        {/* 標題 */}
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              台指期貨
+            </h2>
+            <p className="text-sm text-gray-400 dark:text-gray-500">
+              MXF
+            </p>
+          </div>
+          <div className="px-3 py-1 rounded-full bg-gray-100">
+            <span className="text-sm font-medium text-gray-400">
+              --
+            </span>
+          </div>
+        </div>
+
+        {/* 主要報價 */}
+        <div className="mb-4">
+          <div className="flex items-baseline gap-3">
+            <span className="text-4xl font-bold text-gray-300">
+              --,---
+            </span>
+            <div className="flex flex-col">
+              <span className="text-lg font-semibold text-gray-300">
+                --
+              </span>
+              <span className="text-sm text-gray-300">
+                --.--% 
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* 多空分析資訊 */}
+        <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-400 text-center py-8">等待資料載入中...</p>
+        </div>
+
+        {/* 更新時間 */}
+        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            更新時間：--:--:--
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const isPositive = quote.change >= 0;
   const changeColor = isPositive ? 'text-red-500' : 'text-green-500';
   const bgColor = isPositive ? 'bg-red-50' : 'bg-green-50';

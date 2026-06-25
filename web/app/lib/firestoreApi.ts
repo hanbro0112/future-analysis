@@ -74,97 +74,25 @@ export async function getMinuteData(
 }
 
 /**
- * 往回查詢最近有資料的日期
- * @param symbol 商品代碼
- * @param marketType 盤別
- * @param maxDays 最多往回查詢天數
- * @returns 最近有資料的日期字串和資料
- */
-async function findLatestAvailableData(
-  symbol: string,
-  marketType: 'regular' | 'after_hours',
-  maxDays: number = 7
-): Promise<{ date: string; data: MinuteBar[] }> {
-  const today = new Date();
-  
-  for (let i = 0; i < maxDays; i++) {
-    const checkDate = new Date(today);
-    checkDate.setDate(checkDate.getDate() - i);
-    const dateStr = formatDateToYYYYMMDD(checkDate);
-    
-    const data = await getMinuteData(symbol, dateStr, marketType);
-    if (data.length > 0) {
-      console.log(`✅ 找到最近資料: ${dateStr} (${i === 0 ? '今天' : `${i}天前`})`);
-      return { date: dateStr, data };
-    }
-  }
-  
-  console.warn(`⚠️ 往回查詢 ${maxDays} 天都沒有資料`);
-  return { date: formatDateToYYYYMMDD(today), data: [] };
-}
-
-/**
- * 取得今日日盤資料（若無則使用最近一次的日盤資料）
+ * 取得今日日盤資料
  * @param symbol 商品代碼 (例如: MXF)
  * @returns 日盤分鐘資料陣列
  */
 export async function getTodayDaySession(symbol: string): Promise<MinuteBar[]> {
-  const result = await findLatestAvailableData(symbol, 'regular');
-  return result.data;
+  const today = new Date();
+  const dateStr = formatDateToYYYYMMDD(today);
+  return getMinuteData(symbol, dateStr, 'regular');
 }
 
 /**
- * 取得今日夜盤資料（處理跨日情況，若無則使用最近一次的夜盤資料）
+ * 取得今日夜盤資料
  * @param symbol 商品代碼 (例如: MXF)
  * @returns 夜盤分鐘資料陣列
  */
 export async function getTodayNightSession(symbol: string): Promise<MinuteBar[]> {
-  const now = new Date();
-  const currentHour = now.getHours();
-  
-  // 夜盤時間：15:00-05:00（次日）
-  // 如果當前時間 < 05:00，表示是跨日的夜盤，需要查詢昨天的資料
-  // 如果當前時間 >= 05:00，查詢今天的資料
-  
-  if (currentHour < 5) {
-    // 凌晨時段，查詢昨天和今天的夜盤資料
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = formatDateToYYYYMMDD(yesterday);
-    const todayStr = formatDateToYYYYMMDD(now);
-    
-    const [yesterdayNight, todayNight] = await Promise.all([
-      getMinuteData(symbol, yesterdayStr, 'after_hours'),
-      getMinuteData(symbol, todayStr, 'after_hours')
-    ]);
-    
-    // 昨天 15:00-23:59 的資料 + 今天 00:00-05:00 的資料
-    const yesterdayAfter1500 = yesterdayNight.filter(bar => {
-      const hour = parseInt(bar.time.split(':')[0], 10);
-      return hour >= 15; // 15:00 之後
-    });
-    
-    const todayBefore0500 = todayNight.filter(bar => {
-      const hour = parseInt(bar.time.split(':')[0], 10);
-      return hour < 5; // 05:00 之前
-    });
-    
-    const crossDayData = [...yesterdayAfter1500, ...todayBefore0500];
-    
-    // 如果跨日查詢沒有資料，往回查詢最近有資料的日期
-    if (crossDayData.length === 0) {
-      console.log('🌙 夜盤跨日無資料，往回查詢...');
-      const result = await findLatestAvailableData(symbol, 'after_hours');
-      return result.data;
-    }
-    
-    console.log(`🌙 夜盤跨日: 昨日 ${yesterdayAfter1500.length} 筆 + 今日 ${todayBefore0500.length} 筆`);
-    return crossDayData;
-  } else {
-    // 正常時段，查詢今天的夜盤資料（若無則往回查詢）
-    const result = await findLatestAvailableData(symbol, 'after_hours');
-    return result.data;
-  }
+  const today = new Date();
+  const dateStr = formatDateToYYYYMMDD(today);
+  return getMinuteData(symbol, dateStr, 'after_hours');
 }
 
 /**
