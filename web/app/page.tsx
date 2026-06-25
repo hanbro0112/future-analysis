@@ -13,6 +13,50 @@ import { getTodayMinuteData } from './lib/firestoreApi';
 import type { TaifexQuote } from './types/futures';
 import type { MinuteBar, MinuteChartPoint, AnalysisResult } from './types/minuteData';
 
+/**
+ * 根據當前時間判斷預設盤面類型
+ * - 日盤時段（週一至週五 08:45-13:45）=> 'regular'
+ * - 夜盤時段（週一至週五 15:00-次日 05:00）=> 'after_hours'
+ * - 週六全天 => 'after_hours'（顯示週五夜盤資料）
+ * - 週日全天 => 'after_hours'（等待週日晚上夜盤開始）
+ */
+const getDefaultMarketType = (): 'regular' | 'after_hours' => {
+  const now = new Date();
+  const day = now.getDay(); // 0 = 週日, 1 = 週一, ..., 6 = 週六
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const totalMinutes = hours * 60 + minutes;
+
+  // 週六全天 => 夜盤
+  if (day === 6) {
+    return 'after_hours';
+  }
+
+  // 週日全天 => 夜盤
+  if (day === 0) {
+    return 'after_hours';
+  }
+
+  // 週一至週五判斷時間段
+  // 日盤時段：08:45-13:45 (525-825 分鐘)
+  const daySessionStart = 8 * 60 + 45; // 525
+  const daySessionEnd = 13 * 60 + 45; // 825
+
+  // 夜盤時段：15:00-05:00
+  const nightSessionStart = 15 * 60; // 900
+
+  if (totalMinutes >= daySessionStart && totalMinutes <= daySessionEnd) {
+    // 日盤時段
+    return 'regular';
+  } else if (totalMinutes >= nightSessionStart || totalMinutes < 5 * 60) {
+    // 夜盤時段（15:00 之後或 05:00 之前）
+    return 'after_hours';
+  } else {
+    // 其他時間（05:00-08:45 或 13:45-15:00）=> 預設夜盤
+    return 'after_hours';
+  }
+};
+
 export default function Home() {
   // 分鐘級資料狀態
   const [allMinuteData, setAllMinuteData] = useState<MinuteBar[]>([]); // 所有資料
@@ -22,7 +66,22 @@ export default function Home() {
   const [latestAnalysis, setLatestAnalysis] = useState<AnalysisResult | null>(null);
   const [latestTime, setLatestTime] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
-  const [marketType, setMarketType] = useState<'regular' | 'after_hours'>('regular'); // 當前選擇的市場類型
+  const [marketType, setMarketType] = useState<'regular' | 'after_hours'>(getDefaultMarketType()); // 根據當前時間判斷預設盤面
+  const [isMarketTypeManuallySelected, setIsMarketTypeManuallySelected] = useState(false);
+
+  const resolveMarketType = (
+    data: MinuteBar[],
+    preferredMarketType: 'regular' | 'after_hours'
+  ): 'regular' | 'after_hours' => {
+    const hasPreferredData = data.some(bar => bar.market_type === preferredMarketType);
+
+    if (hasPreferredData) {
+      return preferredMarketType;
+    }
+
+    // 若偏好盤面沒有資料，退回最新資料所屬盤面
+    return data[data.length - 1].market_type;
+  };
 
   // 從分鐘資料生成報價資訊
   const generateQuoteFromMinuteData = (data: MinuteBar[]): TaifexQuote | null => {
@@ -105,13 +164,14 @@ export default function Home() {
         
         if (data.length > 0) {
           setAllMinuteData(data); // 儲存所有資料
-          
-          // 判斷市場類型（從最新資料）
-          const latestMarketType = data[data.length - 1].market_type;
-          setMarketType(latestMarketType);
-          
-          // 根據市場類型過濾資料
-          const filteredData = data.filter(bar => bar.market_type === latestMarketType);
+
+          // 預設使用時間判斷的盤面，若無資料則退回最新資料盤面
+          const defaultMarketType = getDefaultMarketType();
+          const resolvedMarketType = resolveMarketType(data, defaultMarketType);
+          setMarketType(resolvedMarketType);
+
+          // 根據解析後的市場類型過濾資料
+          const filteredData = data.filter(bar => bar.market_type === resolvedMarketType);
           setMinuteData(filteredData);
           
           // 轉換為圖表資料
@@ -126,8 +186,8 @@ export default function Home() {
           }));
           setChartData(chartPoints);
           
-          // 更新報價資訊
-          const quoteData = generateQuoteFromMinuteData(data);
+          // 更新報價資訊（依目前盤面）
+          const quoteData = generateQuoteFromMinuteData(filteredData);
           setQuote(quoteData);
           
           // 取得最新的分析結果
@@ -137,6 +197,8 @@ export default function Home() {
             setLatestTime(`${latest.date} ${latest.time}`);
             console.log('📊 最新分析:', latest.analysis);
           } else {
+            setLatestAnalysis(null);
+            setLatestTime('');
             console.log('⚠️ 最新資料無分析結果');
           }
         } else {
@@ -179,16 +241,24 @@ export default function Home() {
     async function updateData() {
       try {
         const data = await getTodayMinuteData('MXF');
-        
+
         if (data.length > minuteData.length) {
           // 有新資料
-          setMinuteData(data);
-          
-          // 判斷市場類型（從最新資料）
-          const latestMarketType = data[data.length - 1].market_type;
-          setMarketType(latestMarketType);
-          
-          const chartPoints: MinuteChartPoint[] = data.map(bar => ({
+          setAllMinuteData(data);
+
+          const preferredMarketType = isMarketTypeManuallySelected
+            ? marketType
+            : getDefaultMarketType();
+          const resolvedMarketType = resolveMarketType(data, preferredMarketType);
+
+          if (!isMarketTypeManuallySelected) {
+            setMarketType(resolvedMarketType);
+          }
+
+          const filteredData = data.filter(bar => bar.market_type === resolvedMarketType);
+          setMinuteData(filteredData);
+
+          const chartPoints: MinuteChartPoint[] = filteredData.map(bar => ({
             time: bar.time,
             avg_price: bar.avg_price,
             high: bar.high,
@@ -199,14 +269,17 @@ export default function Home() {
           }));
           setChartData(chartPoints);
           
-          // 更新報價資訊
-          const quoteData = generateQuoteFromMinuteData(data);
+          // 更新報價資訊（依目前盤面）
+          const quoteData = generateQuoteFromMinuteData(filteredData);
           setQuote(quoteData);
-          
-          const latest = data[data.length - 1];
+
+          const latest = filteredData[filteredData.length - 1];
           if (latest.analysis) {
             setLatestAnalysis(latest.analysis);
             setLatestTime(`${latest.date} ${latest.time}`);
+          } else {
+            setLatestAnalysis(null);
+            setLatestTime('');
           }
           
           console.log('✅ 資料已更新:', latest.time);
@@ -228,10 +301,11 @@ export default function Home() {
     }, firstDelay);
 
     return () => clearTimeout(firstTimeout);
-  }, [minuteData.length]);
+  }, [minuteData.length, marketType, isMarketTypeManuallySelected]);
 
   // 切換市場類型（日盤/夜盤）
   const handleMarketTypeChange = (newMarketType: 'regular' | 'after_hours') => {
+    setIsMarketTypeManuallySelected(true);
     setMarketType(newMarketType);
     
     // 過濾對應的資料
@@ -259,6 +333,9 @@ export default function Home() {
     if (latest?.analysis) {
       setLatestAnalysis(latest.analysis);
       setLatestTime(`${latest.date} ${latest.time}`);
+    } else {
+      setLatestAnalysis(null);
+      setLatestTime('');
     }
   };
 
