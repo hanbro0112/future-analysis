@@ -8,7 +8,7 @@
 import { useState, useEffect } from 'react';
 import QuoteCard from './components/QuoteCard';
 import MinuteChart from './components/MinuteChart';
-import AnalysisTable from './components/AnalysisTable';
+
 import { getTodayMinuteData } from './lib/firestoreApi';
 import type { TaifexQuote } from './types/futures';
 import type { MinuteBar, MinuteChartPoint, AnalysisResult } from './types/minuteData';
@@ -194,7 +194,11 @@ export default function Home() {
           const latest = filteredData[filteredData.length - 1];
           if (latest?.analysis) {
             setLatestAnalysis(latest.analysis);
-            setLatestTime(`${latest.date} ${latest.time}`);
+            // 格式化時間：HHMM -> HH:MM
+            const formattedTime = latest.time.length === 4 
+              ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}` 
+              : latest.time;
+            setLatestTime(`${latest.date} ${formattedTime}`);
             console.log('📊 最新分析:', latest.analysis);
           } else {
             setLatestAnalysis(null);
@@ -276,7 +280,11 @@ export default function Home() {
           const latest = filteredData[filteredData.length - 1];
           if (latest.analysis) {
             setLatestAnalysis(latest.analysis);
-            setLatestTime(`${latest.date} ${latest.time}`);
+            // 格式化時間：HHMM -> HH:MM
+            const formattedTime = latest.time.length === 4 
+              ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}` 
+              : latest.time;
+            setLatestTime(`${latest.date} ${formattedTime}`);
           } else {
             setLatestAnalysis(null);
             setLatestTime('');
@@ -332,7 +340,11 @@ export default function Home() {
     const latest = filteredData[filteredData.length - 1];
     if (latest?.analysis) {
       setLatestAnalysis(latest.analysis);
-      setLatestTime(`${latest.date} ${latest.time}`);
+      // 格式化時間：HHMM -> HH:MM
+      const formattedTime = latest.time.length === 4 
+        ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}` 
+        : latest.time;
+      setLatestTime(`${latest.date} ${formattedTime}`);
     } else {
       setLatestAnalysis(null);
       setLatestTime('');
@@ -340,14 +352,14 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-gray-50">
       {/* 頁面標題 */}
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+      <header className="bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+          <h1 className="text-xl font-bold text-gray-800">
             期貨資訊分析
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-xs text-gray-500 mt-1">
             台指期分鐘級走勢與多空分析
           </p>
         </div>
@@ -358,28 +370,28 @@ export default function Home() {
         {isLoading ? (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            <p className="mt-4 text-gray-500">載入資料中...</p>
+            <p className="mt-4 text-gray-600">載入資料中...</p>
           </div>
         ) : (
           <>
             {/* 市場類型切換按鈕 */}
-            <div className="mb-6 flex gap-3">
+            <div className="mb-6 flex gap-2">
               <button
                 onClick={() => handleMarketTypeChange('regular')}
-                className={`px-6 py-2.5 rounded-lg font-medium transition-all ${
+                className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
                   marketType === 'regular'
                     ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
                 }`}
               >
                 日盤 (08:45-13:45)
               </button>
               <button
                 onClick={() => handleMarketTypeChange('after_hours')}
-                className={`px-6 py-2.5 rounded-lg font-medium transition-all ${
+                className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
                   marketType === 'after_hours'
                     ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
                 }`}
               >
                 夜盤 (15:00-05:00)
@@ -387,7 +399,7 @@ export default function Home() {
             </div>
 
             {/* 台指期分鐘級走勢 */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* 左側：報價卡片 */}
               <div className="lg:col-span-1">
                 <QuoteCard quote={quote} analysis={latestAnalysis} />
@@ -399,19 +411,9 @@ export default function Home() {
                   data={chartData} 
                   title="台指期分鐘級走勢"
                   marketType={marketType}
+                  latestAnalysis={latestAnalysis}
                 />
               </div>
-            </div>
-
-            {/* 多空分析結果 */}
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-8">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">
-                多空分析
-              </h2>
-              <AnalysisTable 
-                analysis={latestAnalysis} 
-                time={latestTime}
-              />
             </div>
           </>
         )}

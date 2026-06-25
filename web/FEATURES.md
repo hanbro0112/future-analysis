@@ -109,7 +109,6 @@ web/
 │   │   ├── FuturesChart.tsx       # 台指期即時走勢圖
 │   │   ├── QuoteCard.tsx          # 即時報價卡片
 │   │   ├── MinuteChart.tsx        # 分鐘級線路圖（新增）
-│   │   └── AnalysisTable.tsx      # 多空分析表格（新增）
 │   ├── lib/
 │   │   ├── firebase.ts            # Firebase 初始化（新增）
 │   │   ├── firestoreApi.ts        # Firestore 資料存取（新增）

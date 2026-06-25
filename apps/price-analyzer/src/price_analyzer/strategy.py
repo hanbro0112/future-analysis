@@ -161,12 +161,12 @@ class BasisAnalysis:
             return "中性"
         elif self.is_contango:
             if self.basis_pct > 0.5:
-                return "強勢正價差 (偏多)"
-            return "正價差 (偏多)"
+                return "強勢正價差"
+            return "正價差"
         else:
             if self.basis_pct < -0.5:
-                return "強勢逆價差 (偏空)"
-            return "逆價差 (偏空)"
+                return "強勢逆價差"
+            return "逆價差"
 
 
 @dataclass

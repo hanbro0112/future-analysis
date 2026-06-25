@@ -43,33 +43,42 @@ function formatTime(date: Date): string {
 }
 
 /**
- * 根據信號決定顏色
+ * 根據信號決定顏色（專業淺色主題 + 台灣風格：紅漲綠跌）
  */
 function getSignalColor(signal: string): string {
-  if (signal.includes('強多')) return 'bg-green-500 text-white';
-  if (signal.includes('偏多')) return 'bg-green-100 text-green-700';
-  if (signal.includes('強空')) return 'bg-red-500 text-white';
-  if (signal.includes('偏空')) return 'bg-red-100 text-red-700';
+  if (signal.includes('強多')) return 'bg-red-600 text-white';
+  if (signal.includes('偏多')) return 'bg-red-100 text-red-700';
+  if (signal.includes('強空')) return 'bg-green-600 text-white';
+  if (signal.includes('偏空')) return 'bg-green-100 text-green-700';
   return 'bg-gray-100 text-gray-700';
+}
+
+/**
+ * 根據情緒決定顏色（專業淺色主題 + 台灣風格）
+ */
+function getSentimentColor(label: string): string {
+  if (label.includes('貪婪')) return 'text-red-600';
+  if (label.includes('恐慌')) return 'text-green-600';
+  return 'text-gray-600';
 }
 
 export default function QuoteCard({ quote, analysis }: QuoteCardProps) {
   // 無資料時顯示空框架
   if (!quote) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         {/* 標題 */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            <h2 className="text-base font-semibold text-gray-800">
               台指期貨
             </h2>
-            <p className="text-sm text-gray-400 dark:text-gray-500">
+            <p className="text-xs text-gray-500">
               MXF
             </p>
           </div>
           <div className="px-3 py-1 rounded-full bg-gray-100">
-            <span className="text-sm font-medium text-gray-400">
+            <span className="text-xs font-medium text-gray-400">
               --
             </span>
           </div>
@@ -78,11 +87,11 @@ export default function QuoteCard({ quote, analysis }: QuoteCardProps) {
         {/* 主要報價 */}
         <div className="mb-4">
           <div className="flex items-baseline gap-3">
-            <span className="text-4xl font-bold text-gray-300">
+            <span className="text-3xl font-bold text-gray-300">
               --,---
             </span>
             <div className="flex flex-col">
-              <span className="text-lg font-semibold text-gray-300">
+              <span className="text-base font-semibold text-gray-300">
                 --
               </span>
               <span className="text-sm text-gray-300">
@@ -93,13 +102,13 @@ export default function QuoteCard({ quote, analysis }: QuoteCardProps) {
         </div>
 
         {/* 多空分析資訊 */}
-        <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="pt-4 border-t border-gray-200">
           <p className="text-xs text-gray-400 text-center py-8">等待資料載入中...</p>
         </div>
 
         {/* 更新時間 */}
-        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-          <p className="text-xs text-gray-400 dark:text-gray-500">
+        <div className="mt-4 pt-4 border-t border-gray-200">
+          <p className="text-xs text-gray-500">
             更新時間：--:--:--
           </p>
         </div>
@@ -108,18 +117,19 @@ export default function QuoteCard({ quote, analysis }: QuoteCardProps) {
   }
 
   const isPositive = quote.change >= 0;
-  const changeColor = isPositive ? 'text-red-500' : 'text-green-500';
+  // 台灣風格：紅漲綠跌
+  const changeColor = isPositive ? 'text-red-600' : 'text-green-600';
   const bgColor = isPositive ? 'bg-red-50' : 'bg-green-50';
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
       {/* 標題 */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+          <h2 className="text-base font-semibold text-gray-800">
             {quote.name}
           </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-gray-500">
             {quote.symbol}
           </p>
         </div>
@@ -133,11 +143,11 @@ export default function QuoteCard({ quote, analysis }: QuoteCardProps) {
       {/* 主要報價 */}
       <div className="mb-4">
         <div className="flex items-baseline gap-3">
-          <span className={`text-4xl font-bold ${changeColor}`}>
+          <span className={`text-3xl font-bold ${changeColor}`}>
             {formatNumber(quote.lastPrice)}
           </span>
           <div className="flex flex-col">
-            <span className={`text-lg font-semibold ${changeColor}`}>
+            <span className={`text-base font-semibold ${changeColor}`}>
               {isPositive ? '+' : ''}{formatNumber(quote.change)}
             </span>
             <span className={`text-sm ${changeColor}`}>
@@ -149,29 +159,29 @@ export default function QuoteCard({ quote, analysis }: QuoteCardProps) {
 
       {/* 多空分析資訊 */}
       {analysis ? (
-        <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="pt-4 border-t border-gray-200">
           {/* 多空信號 */}
           <div className="mb-3">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-gray-500 dark:text-gray-400">多空信號</span>
+              <span className="text-xs text-gray-500">多空信號</span>
               <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getSignalColor(analysis.signal)}`}>
                 {analysis.signal}
               </span>
             </div>
           </div>
 
-          {/* 多空比例條 */}
+          {/* 多空比例條（台灣風格：紅多綠空） */}
           <div className="mb-3">
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">多空比例</p>
+            <p className="text-xs text-gray-500 mb-2">多空比例</p>
             <div className="flex gap-1 h-6 rounded overflow-hidden">
               <div 
-                className="bg-green-500 flex items-center justify-center text-white text-xs font-semibold"
+                className="bg-red-500 flex items-center justify-center text-white text-xs font-semibold"
                 style={{ width: `${analysis.long_ratio}%` }}
               >
                 {analysis.long_ratio.toFixed(0)}%
               </div>
               <div 
-                className="bg-red-500 flex items-center justify-center text-white text-xs font-semibold"
+                className="bg-green-500 flex items-center justify-center text-white text-xs font-semibold"
                 style={{ width: `${analysis.short_ratio}%` }}
               >
                 {analysis.short_ratio.toFixed(0)}%
@@ -182,28 +192,40 @@ export default function QuoteCard({ quote, analysis }: QuoteCardProps) {
           {/* 其他指標 */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">市場情緒</p>
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+              <p className="text-xs text-gray-500">市場情緒</p>
+              <p className={`text-sm font-medium ${getSentimentColor(analysis.sentiment_label)}`}>
                 {analysis.sentiment_label}
               </p>
             </div>
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">信心水準</p>
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                {analysis.confidence.toFixed(0)}%
+              <p className="text-xs text-gray-500">成交量</p>
+              <p className="text-sm font-medium text-blue-600">
+                {analysis.volume_explosion_level}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">期現價差</p>
+              <p className={`text-sm font-medium ${analysis.basis > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {analysis.basis > 0 ? '+' : ''}{analysis.basis.toFixed(0)} ({analysis.basis_pct > 0 ? '+' : ''}{analysis.basis_pct.toFixed(2)}%)
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">價差信號</p>
+              <p className={`text-sm font-medium ${analysis.basis > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {analysis.basis > 0 ? '正價差' : '逆價差'}
               </p>
             </div>
           </div>
         </div>
       ) : (
-        <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="pt-4 border-t border-gray-200">
           <p className="text-xs text-gray-400 text-center py-4">暫無分析資料</p>
         </div>
       )}
 
       {/* 更新時間 */}
-      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+      <div className="mt-4 pt-4 border-t border-gray-200">
+        <p className="text-xs text-gray-500">
           更新時間：{formatTime(quote.updateTime)}
         </p>
       </div>
