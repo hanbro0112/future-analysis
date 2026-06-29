@@ -22,6 +22,17 @@ export function validateInput(input: AutoCommitInput): void {
   if (!input.description || input.description.trim().length === 0) {
     throw new Error('E003: description 是必填項且不能為空')
   }
+
+  // 驗證 body 必填
+  if (!input.body || input.body.trim().length === 0) {
+    throw new Error('E003-1: body 是必填項，必須提供詳細的改動說明（使用條列式格式）')
+  }
+
+  // 驗證 body 格式（建議使用條列式）
+  const hasListFormat = input.body.includes('-') || input.body.includes('*')
+  if (!hasListFormat) {
+    console.warn('⚠️  建議 body 使用條列式格式（- 或 * 開頭），例如：\n- 改動項目 1\n- 改動項目 2')
+  }
 }
 
 /**

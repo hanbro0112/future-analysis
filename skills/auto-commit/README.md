@@ -2,14 +2,22 @@
 
 自動生成並提交符合 Conventional Commits 規範的 Git 提交訊息。
 
+## ⚠️ 重要提醒
+
+1. **優先使用原生 `git commit` 命令**：如果可以直接使用，請不要依賴此 skill
+2. **body 為必填項**：所有 commit 必須包含詳細的改動說明
+3. **body 使用條列式格式**：使用 `- 改動項目` 格式
+
 ## 快速開始
 
 ```typescript
 import { autoCommit } from './skills/auto-commit/scripts/index.js'
 
+// ✅ 正確：包含必填的 body
 const result = await autoCommit({
   type: 'feat',
-  description: '新增用戶認證功能'
+  description: '新增用戶認證功能',
+  body: '- 整合 Firebase Auth\n- 新增 OAuth 登入流程\n- 加入 JWT token 驗證'
 })
 
 if (result.success) {
@@ -41,10 +49,10 @@ skills/auto-commit/
 - ✅ 遵循 Conventional Commits 規範
 - ✅ 支援 9 種提交類型 (feat, fix, docs, style, refactor, perf, test, chore, ci)
 - ✅ 支援提交範疇 (scope)
-- ✅ 支援詳細說明 (body) 和 Breaking Changes
-- ✅ 支援 Issue 鏈接
+- ✅ **強制要求 body（詳細說明）**：必須使用條列式格式
+- ✅ 支援 Breaking Changes 和 Issue 鏈接
 - ✅ 完整的錯誤碼系統 (E001-E007)
-- ✅ 前置條件檢查
+- ✅ 前置條件檢查（Git 可用、在儲存庫中、有暫存變更）
 - ✅ **description 和 body 之間空一行**
 - ✅ **body 內條目之間不空行**：直接換行即可
 
@@ -84,12 +92,13 @@ Closes #123, #456
 
 ## 使用場景
 
-### 簡單提交
+### 基本提交（必須包含 body）
 
 ```typescript
 await autoCommit({
   type: 'feat',
-  description: '新增用戶認證'
+  description: '新增用戶認證',
+  body: '- 整合 Firebase Auth\n- 新增登入頁面\n- 加入密碼加密'
 })
 ```
 
@@ -99,19 +108,20 @@ await autoCommit({
 await autoCommit({
   type: 'fix',
   scope: 'auth',
-  description: '修復登入驗證'
+  description: '修復登入驗證',
+  body: '- 修正 token 過期判斷邏輯\n- 加入重新登入提示\n- 優化錯誤訊息顯示'
 })
 ```
 
-### 完整提交
+### 完整提交（含 Breaking Changes）
 
 ```typescript
 await autoCommit({
   type: 'feat',
   scope: 'api',
   description: '重構 API 認證',
-  body: '使用 Bearer token 替代 API key',
-  breaking: 'API key 認證已棄用',
+  body: '- 使用 Bearer token 替代 API key\n- 新增 token 刷新機制\n- 加入 rate limiting',
+  breaking: 'API key 認證已棄用，必須遷移至 Bearer token',
   issues: ['#123', '#456']
 })
 ```

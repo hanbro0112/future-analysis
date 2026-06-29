@@ -13,7 +13,7 @@ describe('Auto Commit - 執行邏輯', () => {
 
   describe('validateInput', () => {
     it('應該在 type 為空時拋出錯誤', () => {
-      const input = { description: 'test' } as AutoCommitInput
+      const input = { description: 'test', body: '- change' } as AutoCommitInput
 
       expect(() => validateInput(input)).toThrow('E001')
     })
@@ -21,7 +21,8 @@ describe('Auto Commit - 執行邏輯', () => {
     it('應該在無效的 type 時拋出錯誤', () => {
       const input: AutoCommitInput = {
         type: 'invalid' as unknown as AutoCommitInput['type'],
-        description: 'test'
+        description: 'test',
+        body: '- change'
       }
 
       expect(() => validateInput(input)).toThrow('E002')
@@ -30,16 +31,27 @@ describe('Auto Commit - 執行邏輯', () => {
     it('應該在 description 為空時拋出錯誤', () => {
       const input: AutoCommitInput = {
         type: 'feat',
-        description: ''
+        description: '',
+        body: '- change'
       }
 
       expect(() => validateInput(input)).toThrow('E003')
     })
 
+    it('應該在 body 為空時拋出錯誤', () => {
+      const input = {
+        type: 'feat',
+        description: 'test'
+      } as any
+
+      expect(() => validateInput(input)).toThrow('E003-1')
+    })
+
     it('應該接受有效的輸入', () => {
       const input: AutoCommitInput = {
         type: 'feat',
-        description: 'test'
+        description: 'test',
+        body: '- change 1\n- change 2'
       }
 
       expect(() => validateInput(input)).not.toThrow()
@@ -50,24 +62,28 @@ describe('Auto Commit - 執行邏輯', () => {
     it('應該生成簡單的提交訊息', () => {
       const input: AutoCommitInput = {
         type: 'feat',
-        description: '新增功能'
+        description: '新增功能',
+        body: '- 新增登入頁面\n- 新增註冊功能'
       }
 
       const message = generateCommitMessage(input)
 
-      expect(message).toBe('feat: 新增功能')
+      expect(message).toContain('feat: 新增功能')
+      expect(message).toContain('- 新增登入頁面')
     })
 
     it('應該生成包含 scope 的提交訊息', () => {
       const input: AutoCommitInput = {
         type: 'fix',
         scope: 'auth',
-        description: '修復登入'
+        description: '修復登入',
+        body: '- 修正 token 過期判斷\n- 優化錯誤訊息'
       }
 
       const message = generateCommitMessage(input)
 
-      expect(message).toBe('fix(auth): 修復登入')
+      expect(message).toContain('fix(auth): 修復登入')
+      expect(message).toContain('- 修正 token 過期判斷')
     })
 
     it('應該包含 body、breaking change 和 issues', () => {
@@ -75,16 +91,16 @@ describe('Auto Commit - 執行邏輯', () => {
         type: 'feat',
         scope: 'api',
         description: '重構 API',
-        body: '詳細說明',
-        breaking: 'Breaking change 說明',
+        body: '- 使用 Bearer token\n- 新增 rate limiting',
+        breaking: 'API key 認證已棄用',
         issues: ['#123', '#456']
       }
 
       const message = generateCommitMessage(input)
 
       expect(message).toContain('feat(api): 重構 API')
-      expect(message).toContain('\n\n詳細說明')
-      expect(message).toContain('BREAKING CHANGE: Breaking change 說明')
+      expect(message).toContain('- 使用 Bearer token')
+      expect(message).toContain('BREAKING CHANGE: API key 認證已棄用')
       expect(message).toContain('Closes #123, #456')
     })
   })

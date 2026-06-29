@@ -3,12 +3,78 @@
 ## 基本資訊
 
 **Skill ID**: `auto-commit`  
-**版本**: 2.1.0  
-**最後更新**: 2026-03-06  
+**版本**: 2.2.0  
+**最後更新**: 2026-06-30  
 
 ## 一句話描述
 
 Git 提交訊息
+
+## ⚠️ 使用條件與規範
+
+### 優先使用原生 Git 命令
+
+**如果可以直接使用 `git commit`，請優先使用原生命令而非此 skill**，以保持簡潔性。
+
+### 必須包含 Body
+
+所有 commit **必須包含 body**（詳細說明），格式如下：
+
+```
+{type}({scope}): {description}
+
+- {改動說明 1}
+- {改動說明 2}
+- {改動說明 3}
+```
+
+### Body 格式規範
+
+Body 必須使用**繁體中文**並遵循以下規範：
+
+1. **使用條列式說明**（每項改動一行）
+2. **清晰描述具體改動內容**（不要模糊描述）
+3. **按邏輯順序排列**（從主要到次要）
+
+#### ✅ 正確範例
+
+```bash
+git commit -m "fix(strategy): 修復多空比不更新的問題
+
+- 當 tick_type 為 0 時，根據價格變動推測內外盤
+- 價格上漲判定為外盤（買進），下跌判定為內盤（賣出）
+- 價格不變時均分到買賣雙方
+- 加入詳細的調試輸出顯示 tick_type 和視窗統計"
+```
+
+#### ❌ 錯誤範例
+
+```bash
+# ❌ 沒有 body
+git commit -m "fix: 修復問題"
+
+# ❌ body 描述不清楚
+git commit -m "fix: 修復問題
+
+- 更新了一些邏輯
+- 修改了代碼"
+```
+
+### Commit Type 規範
+
+遵循 Conventional Commits：
+
+| Type | 說明 | 範例 |
+|------|------|------|
+| `feat` | 新增功能 | `feat(auth): 新增 OAuth 登入` |
+| `fix` | 修復錯誤 | `fix(api): 修復資料重複問題` |
+| `docs` | 文檔變更 | `docs(readme): 更新安裝說明` |
+| `style` | 程式碼格式調整 | `style: 統一縮排為 2 空格` |
+| `refactor` | 重構程式碼 | `refactor(utils): 簡化日期處理邏輯` |
+| `perf` | 效能優化 | `perf(query): 優化資料庫查詢` |
+| `test` | 測試相關 | `test(user): 新增使用者測試案例` |
+| `chore` | 雜項變更 | `chore: 更新依賴版本` |
+| `ci` | CI/CD 變更 | `ci: 新增 GitHub Actions` |
 
 ## 功能說明
 
@@ -73,7 +139,7 @@ Git 提交訊息
 | type | CommitType | ✅ | 提交類型 | `feat`, `fix` |
 | scope | string | ❌ | 提交範疇 | `auth`, `api` |
 | description | string | ✅ | 簡短描述 | `新增用戶認證` |
-| body | string | ❌ | 詳細說明 | `詳細的實現說明` |
+| body | string | ✅ | 詳細說明（必填，使用條列式） | `- 新增 OAuth 登入流程\n- 整合 Firebase Auth` |
 | breaking | string | ❌ | Breaking Change | `舊端點已移除` |
 | issues | string[] | ❌ | 相關 Issue | `['#123']` |
 | splitByType | boolean | ❌ | 是否按 commit 類型拆分 | `true` (預設: `false`) |
@@ -96,6 +162,8 @@ Git 提交訊息
 | E001 | type 是必填項 | 未提供 type | 提供有效的 type 值 |
 | E002 | 無效的 type | type 不在允許清單 | 使用 feat, fix 等 |
 | E003 | description 是必填項 | 未提供 description | 提供非空 description |
+| E003-1 | body 是必填項 | 未提供 body 詳細說明 | 提供條列式改動說明 |
+| E003-2 | body 格式不正確 | body 未使用條列式 | 使用 `- 改動項目` 格式 |
 | E004 | Git 不可用 | Git 未安裝 | 安裝 Git |
 | E005 | 不在 Git 儲存庫中 | 目錄不是 Git 儲存庫 | 進入 Git 儲存庫目錄 |
 | E006 | 沒有暫存的變更 | 沒有 git add | 先執行 git add |

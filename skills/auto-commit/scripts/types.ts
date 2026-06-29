@@ -14,8 +14,8 @@ export interface AutoCommitInput {
   scope?: string
   /** 提交描述 (必填) */
   description: string
-  /** 詳細說明 (可選) */
-  body?: string
+  /** 詳細說明 (必填，使用條列式格式) */
+  body: string
   /** Breaking changes (可選) */
   breaking?: string
   /** 相關 issue (可選，例如 #123) */
