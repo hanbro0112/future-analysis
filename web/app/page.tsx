@@ -57,6 +57,82 @@ const getDefaultMarketType = (): 'regular' | 'after_hours' => {
   }
 };
 
+/**
+ * 獲取最近的交易日（排除週末）
+ * @param date 基準日期
+ * @returns 最近的交易日
+ */
+const getLastTradingDay = (date: Date): Date => {
+  const result = new Date(date);
+  const day = result.getDay();
+  
+  // 如果是週六，往前推到週五
+  if (day === 6) {
+    result.setDate(result.getDate() - 1);
+  }
+  // 如果是週日，往前推到週五
+  else if (day === 0) {
+    result.setDate(result.getDate() - 2);
+  }
+  
+  return result;
+};
+
+/**
+ * 獲取日盤的交易日期
+ * @returns 當前交易日
+ */
+const getDaySessionDate = (): Date => {
+  const now = new Date();
+  return getLastTradingDay(now);
+};
+
+/**
+ * 獲取夜盤的交易日期
+ * @returns 夜盤對應的交易日
+ */
+const getNightSessionDate = (): Date => {
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const totalMinutes = hours * 60 + minutes;
+  
+  // 14:50 之前顯示前一天的夜盤
+  if (totalMinutes < 14 * 60 + 50) {
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return getLastTradingDay(yesterday);
+  }
+  
+  // 14:50 之後顯示當天的夜盤
+  return getLastTradingDay(now);
+};
+
+/**
+ * 格式化日期為 MM/DD 格式
+ */
+const formatDate = (date: Date): string => {
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${month}/${day}`;
+};
+
+/**
+ * 獲取日盤顯示文字
+ */
+const getDaySessionLabel = (): string => {
+  const date = getDaySessionDate();
+  return `日盤 ${formatDate(date)} (08:45-13:45)`;
+};
+
+/**
+ * 獲取夜盤顯示文字
+ */
+const getNightSessionLabel = (): string => {
+  const date = getNightSessionDate();
+  return `夜盤 ${formatDate(date)} (15:00-05:00)`;
+};
+
 export default function Home() {
   // 分鐘級資料狀態
   const [allMinuteData, setAllMinuteData] = useState<MinuteBar[]>([]); // 所有資料
@@ -384,7 +460,7 @@ export default function Home() {
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
                 }`}
               >
-                日盤 (08:45-13:45)
+                {getDaySessionLabel()}
               </button>
               <button
                 onClick={() => handleMarketTypeChange('after_hours')}
@@ -394,7 +470,7 @@ export default function Home() {
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
                 }`}
               >
-                夜盤 (15:00-05:00)
+                {getNightSessionLabel()}
               </button>
             </div>
 

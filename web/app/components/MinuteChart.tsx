@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import type { MinuteChartPoint, AnalysisResult } from '../types/minuteData'
 
@@ -111,6 +112,14 @@ const CustomTooltip = ({ active, payload }: any) => {
  * - 成交量柱狀圖背景
  */
 export default function MinuteChart({ data, title = '分鐘級走勢', marketType = 'regular', latestAnalysis = null }: MinuteChartProps) {
+  // 控制是否顯示高低價線（日盤預設開啟，夜盤預設關閉）
+  const [showHighLow, setShowHighLow] = useState(marketType === 'regular');
+  
+  // 當 marketType 改變時，更新 showHighLow 狀態
+  useEffect(() => {
+    setShowHighLow(marketType === 'regular');
+  }, [marketType]);
+  
   // 處理並標準化時間格式為 'HH:mm'
   const normalizedData = data.map(item => {
     let timeStr = item.time;
@@ -219,9 +228,20 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-base font-semibold text-gray-800">{title}</h3>
-        {!hasData && (
-          <span className="text-sm text-gray-400 animate-pulse">載入中...</span>
-        )}
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer hover:text-gray-800 transition-colors">
+            <input
+              type="checkbox"
+              checked={showHighLow}
+              onChange={(e) => setShowHighLow(e.target.checked)}
+              className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+            />
+            <span>顯示區間高低價</span>
+          </label>
+          {!hasData && (
+            <span className="text-sm text-gray-400 animate-pulse">載入中...</span>
+          )}
+        </div>
       </div>
       
       <ResponsiveContainer width="100%" height={400}>
@@ -290,33 +310,37 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
             radius={[2, 2, 0, 0]}
           />
           
-          {/* 最低價線（黑色細虛線） */}
-          <Line 
-            yAxisId="price"
-            type="monotone" 
-            dataKey="low" 
-            stroke="#374151" 
-            strokeWidth={1}
-            dot={false}
-            strokeDasharray="3 3"
-            name="最低價"
-            opacity={0.6}
-            connectNulls={false}
-          />
+          {/* 最低價線（黑色細虛線）- 根據選項顯示 */}
+          {showHighLow && (
+            <Line 
+              yAxisId="price"
+              type="monotone" 
+              dataKey="low" 
+              stroke="#374151" 
+              strokeWidth={1}
+              dot={false}
+              strokeDasharray="3 3"
+              name="最低價"
+              opacity={0.6}
+              connectNulls={false}
+            />
+          )}
           
-          {/* 最高價線（黑色細虛線） */}
-          <Line 
-            yAxisId="price"
-            type="monotone" 
-            dataKey="high" 
-            stroke="#374151" 
-            strokeWidth={1}
-            dot={false}
-            strokeDasharray="3 3"
-            name="最高價"
-            opacity={0.6}
-            connectNulls={false}
-          />
+          {/* 最高價線（黑色細虛線）- 根據選項顯示 */}
+          {showHighLow && (
+            <Line 
+              yAxisId="price"
+              type="monotone" 
+              dataKey="high" 
+              stroke="#374151" 
+              strokeWidth={1}
+              dot={false}
+              strokeDasharray="3 3"
+              name="最高價"
+              opacity={0.6}
+              connectNulls={false}
+            />
+          )}
           
           {/* 平均價線（主線，根據市場情緒顯示顏色，台灣風格） */}
           <Line 
