@@ -147,7 +147,6 @@ class MinuteAggregator:
         
         # 更新資料
         bar_data = self.current_bars[key]
-        old_volume = bar_data['volume']
         bar_data['close'] = tick.close
         bar_data['high'] = max(bar_data['high'], tick.close)
         bar_data['low'] = min(bar_data['low'], tick.close)
@@ -156,10 +155,6 @@ class MinuteAggregator:
         bar_data['tick_count'] += 1
         bar_data['bid_total_vol'] = tick.bid_side_total_vol
         bar_data['ask_total_vol'] = tick.ask_side_total_vol
-        
-        print(f"   ➕ 分鐘 {minute_timestamp.strftime('%H:%M')} 累積: "
-              f"{old_volume} + {tick.volume} = {bar_data['volume']} "
-              f"(共 {bar_data['tick_count']} 筆)")
         
         # 內外盤統計
         if tick.tick_type == 1:  # 外盤 (買進)

@@ -49,21 +49,9 @@ def is_emulator_mode() -> bool:
 class PubSubPublisher:
     """Pub/Sub Publisher 輔助類別"""
     
-    def __init__(self, project_id: str = "demo-project", enable_message_ordering: bool = False):
+    def __init__(self, project_id: str = "demo-project"):
         self.project_id = project_id
-        # Emulator 不支援 message ordering，僅在正式環境啟用
-        self.enable_message_ordering = enable_message_ordering and not is_emulator_mode()
-        
-        # 創建 Publisher 時啟用訊息排序（如果需要且非 emulator）
-        if self.enable_message_ordering:
-            publisher_options = pubsub_v1.types.PublisherOptions(enable_message_ordering=True)
-            self.client = pubsub_v1.PublisherClient(publisher_options=publisher_options)
-            print(f"✅ 已啟用訊息排序")
-        else:
-            self.client = get_publisher_client(project_id)
-            if enable_message_ordering and is_emulator_mode():
-                print(f"⚠️  Emulator 模式不支援訊息排序")
-        
+        self.client = get_publisher_client(project_id)
         self._topic_cache = set()
     
     def get_topic_path(self, topic_id: str) -> str:
@@ -135,14 +123,13 @@ class PubSubPublisher:
             print(f"❌ 建立 Topic 失敗: {e}")
             raise
     
-    def publish_message(self, topic_id: str, data: dict, ordering_key: Optional[str] = None, **attributes) -> str:
+    def publish_message(self, topic_id: str, data: dict, **attributes) -> str:
         """
         發布訊息到指定 topic，自動確保 topic 存在
         
         Args:
             topic_id: Topic ID
             data: 要發布的資料（會轉換為 JSON）
-            ordering_key: 訊息排序鍵（相同 key 的訊息會按順序處理）
             **attributes: 額外的訊息屬性
         
         Returns:
@@ -156,11 +143,8 @@ class PubSubPublisher:
         # 將資料轉換為 JSON bytes
         message_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
         
-        # 發布訊息（如果有 ordering_key 則加上）
-        if ordering_key:
-            future = self.client.publish(topic_path, message_data, ordering_key=ordering_key, **attributes)
-        else:
-            future = self.client.publish(topic_path, message_data, **attributes)
+        # 發布訊息
+        future = self.client.publish(topic_path, message_data, **attributes)
         message_id = future.result()
         
         return message_id

@@ -104,7 +104,7 @@ def main():
                     document_id=doc_id
                 )
                 
-                print(f"\n💾 已儲存分鐘資料: {code}/{minute_bar.date.replace('-', '')}/{doc_id} "
+                print(f"💾 已儲存分鐘資料: {code}/{minute_bar.date.replace('-', '')}/{doc_id} "
                       f"(O:{minute_bar.open} H:{minute_bar.high} L:{minute_bar.low} C:{minute_bar.close} "
                       f"V:{minute_bar.volume})\n")
                 
@@ -142,25 +142,12 @@ def main():
             print(f"✅ Subscription 已存在: {subscription_id}")
         except Exception:
             try:
-                # 創建 subscription 並啟用訊息排序
-                from google.cloud.pubsub_v1.types import Subscription
-                subscription = Subscription(
-                    name=subscription_path,
-                    topic=topic_path,
-                    enable_message_ordering=True  # 啟用訊息排序
-                )
-                subscriber_client.create_subscription(request={"subscription": subscription})
-                print(f"✅ Subscription 已創建並綁定到 Topic（已啟用訊息排序）: {subscription_id} -> {topic_id}")
+                subscriber_client.create_subscription(
+                    request={"name": subscription_path, "topic": topic_path}
+                )   
+                print(f"✅ Subscription 已創建並綁定到 Topic: {subscription_id} -> {topic_id}")
             except Exception as e:
                 print(f"⚠️  創建 Subscription 失敗: {e}")
-                # 如果是 emulator 模式不支援 ordering，則創建普通 subscription
-                try:
-                    subscriber_client.create_subscription(
-                        request={"name": subscription_path, "topic": topic_path}
-                    )
-                    print(f"✅ Subscription 已創建（未啟用訊息排序）: {subscription_id} -> {topic_id}")
-                except Exception as e2:
-                    print(f"⚠️  創建 Subscription 失敗: {e2}")
         
         # 初始化 Pub/Sub Subscriber
         subscriber = PubSubSubscriber(
@@ -184,12 +171,7 @@ def main():
                 print(f"⚠️  跳過無效資料：價格或成交量為 0")
                 return
             
-            # 顯示接收到的 tick 資訊（包含時間和成交量）
-            tick_time = data.get('datetime', 'N/A')
-            if isinstance(tick_time, str) and 'T' in tick_time:
-                tick_time = tick_time.split('T')[1][:12]  # 只顯示時間部分
-            print(f"\n📨 收到 Tick: {data.get('code', 'N/A')} @ {data.get('close', 'N/A')} "
-                  f"Vol:{data.get('volume', 0)} Time:{tick_time}")
+            print(f"📊 收到 Tick: {data.get('code', 'N/A')} @ {data.get('close', 'N/A')}")
             
             try:
                 # 轉換為 TickData 物件
@@ -203,7 +185,7 @@ def main():
                     window_1m = analysis_result.window_1min
                     print(f"   🎯 {analysis_result.signal} | "
                           f"多:{analysis_result.long_ratio:.1f}% 空:{analysis_result.short_ratio:.1f}% | "
-                          f"買:{window_1m.buy_volume} 賣:{window_1m.sell_volume}")
+                          f"買:{window_1m.buy_volume} 賣:{window_1m.sell_volume} ")
                 
                 # 加入分鐘聚合器
                 completed_bar = aggregator.add_tick(tick)
