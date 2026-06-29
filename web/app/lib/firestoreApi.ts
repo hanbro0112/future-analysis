@@ -62,6 +62,22 @@ export async function getMinuteData(
       });
     });
     
+    // 如果是夜盤資料，需要重新排序（15:00-23:59 在前，00:00-05:59 在後）
+    if (marketType === 'after_hours' && data.length > 0) {
+      data.sort((a, b) => {
+        const timeA = parseInt(a.time);
+        const timeB = parseInt(b.time);
+        
+        // 夜盤邏輯：15:00-23:59 (900-1439) 排在前，00:00-05:59 (0-359) 排在後
+        const isEarlyA = timeA < 600;  // 00:00-05:59
+        const isEarlyB = timeB < 600;
+        
+        if (isEarlyA && !isEarlyB) return 1;   // A 是凌晨，B 不是 -> A 排後面
+        if (!isEarlyA && isEarlyB) return -1;  // A 不是凌晨，B 是 -> A 排前面
+        return timeA - timeB;  // 同區段，按時間升序
+      });
+    }
+    
     console.log(`✅ 讀取成功: ${data.length} 筆資料`);
     return data;
   } catch (error) {
@@ -75,23 +91,45 @@ export async function getMinuteData(
 
 /**
  * 取得今日日盤資料
+ * 邏輯：08:30 前查詢前一個交易日的日盤
  * @param symbol 商品代碼 (例如: MXF)
  * @returns 日盤分鐘資料陣列
  */
 export async function getTodayDaySession(symbol: string): Promise<MinuteBar[]> {
-  const today = new Date();
-  const dateStr = formatDateToYYYYMMDD(today);
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const timeInMinutes = hour * 60 + minute;
+  
+  // 08:30 前使用前一天的日期
+  let dateForQuery = now;
+  if (timeInMinutes < 8 * 60 + 30) {  // 小於 08:30
+    dateForQuery = new Date(now);
+    dateForQuery.setDate(dateForQuery.getDate() - 1);
+  }
+  
+  const dateStr = formatDateToYYYYMMDD(dateForQuery);
   return getMinuteData(symbol, dateStr, 'regular');
 }
 
 /**
  * 取得今日夜盤資料
+ * 夜盤跨日邏輯：00:00-05:59 的資料儲存在前一天
  * @param symbol 商品代碼 (例如: MXF)
  * @returns 夜盤分鐘資料陣列
  */
 export async function getTodayNightSession(symbol: string): Promise<MinuteBar[]> {
-  const today = new Date();
-  const dateStr = formatDateToYYYYMMDD(today);
+  const now = new Date();
+  const hour = now.getHours();
+  
+  // 夜盤跨日：如果當前時間在 00:00-05:59，使用前一天的日期
+  let dateForQuery = now;
+  if (hour >= 0 && hour < 6) {
+    dateForQuery = new Date(now);
+    dateForQuery.setDate(dateForQuery.getDate() - 1);
+  }
+  
+  const dateStr = formatDateToYYYYMMDD(dateForQuery);
   return getMinuteData(symbol, dateStr, 'after_hours');
 }
 

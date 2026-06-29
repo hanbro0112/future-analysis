@@ -80,32 +80,42 @@ const getLastTradingDay = (date: Date): Date => {
 
 /**
  * 獲取日盤的交易日期
+ * 邏輯：08:30 前顯示前一個交易日的日盤
  * @returns 當前交易日
  */
 const getDaySessionDate = (): Date => {
   const now = new Date();
-  return getLastTradingDay(now);
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const timeInMinutes = hour * 60 + minute;
+  
+  // 08:30 前使用前一天的日期
+  let dateForSession = now;
+  if (timeInMinutes < 8 * 60 + 30) {  // 小於 08:30
+    dateForSession = new Date(now);
+    dateForSession.setDate(dateForSession.getDate() - 1);
+  }
+  
+  return getLastTradingDay(dateForSession);
 };
 
 /**
  * 獲取夜盤的交易日期
+ * 夜盤跨日邏輯：00:00-06:00 的資料儲存在前一天
  * @returns 夜盤對應的交易日
  */
 const getNightSessionDate = (): Date => {
   const now = new Date();
-  const hours = now.getHours();
-  const minutes = now.getMinutes();
-  const totalMinutes = hours * 60 + minutes;
+  const hour = now.getHours();
   
-  // 14:50 之前顯示前一天的夜盤
-  if (totalMinutes < 14 * 60 + 50) {
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    return getLastTradingDay(yesterday);
+  // 夜盤跨日：如果當前時間在 00:00-06:00，使用前一天的日期
+  let dateForQuery = now;
+  if (hour >= 0 && hour <= 6) {
+    dateForQuery = new Date(now);
+    dateForQuery.setDate(dateForQuery.getDate() - 1);
   }
   
-  // 14:50 之後顯示當天的夜盤
-  return getLastTradingDay(now);
+  return getLastTradingDay(dateForQuery);
 };
 
 /**
@@ -191,15 +201,26 @@ export default function Home() {
         }
         
         // 方法1：標準 ISO 格式
-        const dateTimeStr = `${lastBar.date}T${timeStr}:00`;
+        let dateTimeStr = `${lastBar.date}T${timeStr}:00`;
         updateTime = new Date(dateTimeStr);
+        
+        // 夜盤跨日修正：如果是夜盤且時間在 00:00-05:59，日期需要加一天
+        const [hour] = timeStr.split(':').map(Number);
+        if (lastBar.market_type === 'after_hours' && hour >= 0 && hour < 6) {
+          updateTime.setDate(updateTime.getDate() + 1);
+        }
         
         // 如果解析失敗，嘗試其他方式
         if (isNaN(updateTime.getTime())) {
           // 方法2：分別解析日期和時間
           const [year, month, day] = lastBar.date.split('-').map(Number);
-          const [hour, minute] = timeStr.split(':').map(Number);
-          updateTime = new Date(year, month - 1, day, hour, minute);
+          const [h, minute] = timeStr.split(':').map(Number);
+          updateTime = new Date(year, month - 1, day, h, minute);
+          
+          // 夜盤跨日修正
+          if (lastBar.market_type === 'after_hours' && h >= 0 && h < 6) {
+            updateTime.setDate(updateTime.getDate() + 1);
+          }
         }
       } else {
         // 如果資料不完整，使用當前時間
@@ -488,6 +509,7 @@ export default function Home() {
                   title="台指期分鐘級走勢"
                   marketType={marketType}
                   latestAnalysis={latestAnalysis}
+                  isLoading={isLoading}
                 />
               </div>
             </div>

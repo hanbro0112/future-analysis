@@ -9,6 +9,7 @@ interface MinuteChartProps {
   title?: string
   marketType?: 'regular' | 'after_hours' // 市場類型：日盤或夜盤
   latestAnalysis?: AnalysisResult | null // 最新的分析結果（用於決定線條顏色）
+  isLoading?: boolean // 是否載入中
 }
 
 /**
@@ -111,7 +112,7 @@ const CustomTooltip = ({ active, payload }: any) => {
  * - 高低價格淡色線
  * - 成交量柱狀圖背景
  */
-export default function MinuteChart({ data, title = '分鐘級走勢', marketType = 'regular', latestAnalysis = null }: MinuteChartProps) {
+export default function MinuteChart({ data, title = '分鐘級走勢', marketType = 'regular', latestAnalysis = null, isLoading = false }: MinuteChartProps) {
   // 控制是否顯示高低價線（日盤預設開啟，夜盤預設關閉）
   const [showHighLow, setShowHighLow] = useState(marketType === 'regular');
   
@@ -229,16 +230,18 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-base font-semibold text-gray-800">{title}</h3>
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer hover:text-gray-800 transition-colors">
-            <input
-              type="checkbox"
-              checked={showHighLow}
-              onChange={(e) => setShowHighLow(e.target.checked)}
-              className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
-            />
-            <span>顯示區間高低價</span>
-          </label>
-          {!hasData && (
+          {!isLoading && (
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer hover:text-gray-800 transition-colors">
+              <input
+                type="checkbox"
+                checked={showHighLow}
+                onChange={(e) => setShowHighLow(e.target.checked)}
+                className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+              />
+              <span>顯示區間高低價</span>
+            </label>
+          )}
+          {isLoading && (
             <span className="text-sm text-gray-400 animate-pulse">載入中...</span>
           )}
         </div>

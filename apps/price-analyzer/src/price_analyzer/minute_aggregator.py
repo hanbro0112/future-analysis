@@ -125,13 +125,20 @@ class MinuteAggregator:
         key = (tick.code, minute_timestamp)
         
         if key not in self.current_bars:
+            # 決定日期：夜盤跨日時（00:00-05:00）使用前一天日期
+            market_type = self._get_market_type(minute_timestamp)
+            bar_date = minute_timestamp
+            if market_type == 'after_hours' and minute_timestamp.hour < 6:
+                # 夜盤且在 00:00-05:59，日期為前一天
+                bar_date = minute_timestamp - timedelta(days=1)
+            
             # 初始化新的分鐘資料
             self.current_bars[key] = {
                 'code': tick.code,
                 'timestamp': minute_timestamp,
-                'date': minute_timestamp.strftime('%Y-%m-%d'),
+                'date': bar_date.strftime('%Y-%m-%d'),
                 'time': minute_timestamp.strftime('%H%M'),
-                'market_type': self._get_market_type(minute_timestamp),
+                'market_type': market_type,
                 'open': tick.close,
                 'high': tick.close,
                 'low': tick.close,
