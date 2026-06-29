@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceDot } from 'recharts'
 import type { MinuteChartPoint, AnalysisResult } from '../types/minuteData'
 
 interface MinuteChartProps {
@@ -10,6 +10,7 @@ interface MinuteChartProps {
   marketType?: 'regular' | 'after_hours' // 市場類型：日盤或夜盤
   latestAnalysis?: AnalysisResult | null // 最新的分析結果（用於決定線條顏色）
   isLoading?: boolean // 是否載入中
+  referencePrice?: number // 基準價格（用於漲跌幅計算，Y軸中心）
 }
 
 /**
@@ -112,7 +113,7 @@ const CustomTooltip = ({ active, payload }: any) => {
  * - 高低價格淡色線
  * - 成交量柱狀圖背景
  */
-export default function MinuteChart({ data, title = '分鐘級走勢', marketType = 'regular', latestAnalysis = null, isLoading = false }: MinuteChartProps) {
+export default function MinuteChart({ data, title = '分鐘級走勢', marketType = 'regular', latestAnalysis = null, isLoading = false, referencePrice }: MinuteChartProps) {
   // 控制是否顯示高低價線（日盤預設開啟，夜盤預設關閉）
   const [showHighLow, setShowHighLow] = useState(marketType === 'regular');
   
@@ -207,12 +208,70 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
   // 計算價格範圍（用於設定 Y 軸）
   const hasData = normalizedData && normalizedData.length > 0;
   const prices = hasData ? normalizedData.flatMap(d => [d.avg_price, d.high, d.low]) : [20000, 22000];
-  const minPrice = hasData ? Math.floor(Math.min(...prices) * 0.999) : 20000;
-  const maxPrice = hasData ? Math.ceil(Math.max(...prices) * 1.001) : 22000;
+  
+  // 計算 Y 軸範圍和刻度（以基準價為中心，1% 為間隔）
+  let yAxisDomain: [number, number];
+  let yAxisTicks: number[];
+  
+  if (referencePrice && referencePrice > 0 && hasData) {
+    // 使用基準價計算 Y 軸
+    const onePercent = referencePrice * 0.01; // 基準價的 1%
+    const dataMin = Math.min(...prices);
+    const dataMax = Math.max(...prices);
+    
+    // 初始刻度範圍：±2%（刻度只顯示到 ±2%）
+    let rangeSteps = 2;
+    
+    // 檢查數據是否超出 ±2% 範圍，如果超出則擴增
+    const rangeAbove = (dataMax - referencePrice) / onePercent;
+    const rangeBelow = (referencePrice - dataMin) / onePercent;
+    const maxDataRange = Math.max(rangeAbove, rangeBelow);
+    
+    // 如果數據超出 ±2%，擴增到數據範圍 +1%
+    if (maxDataRange > 2) {
+      rangeSteps = Math.ceil(maxDataRange) + 1;
+    }
+    
+    // 生成 Y 軸刻度（基準價在中間，只顯示到 ±rangeSteps）
+    yAxisTicks = [];
+    for (let i = -rangeSteps; i <= rangeSteps; i++) {
+      yAxisTicks.push(referencePrice + i * onePercent);
+    }
+    
+    // Y 軸實際顯示範圍：比刻度多 0.5%
+    const domainRange = rangeSteps + 0.5;
+    yAxisDomain = [
+      referencePrice - domainRange * onePercent,
+      referencePrice + domainRange * onePercent
+    ];
+  } else {
+    // 無基準價時，使用原本的自動範圍
+    const minPrice = hasData ? Math.floor(Math.min(...prices) * 0.999) : 20000;
+    const maxPrice = hasData ? Math.ceil(Math.max(...prices) * 1.001) : 22000;
+    yAxisDomain = [minPrice, maxPrice];
+    yAxisTicks = [];
+  }
 
   // 計算成交量最大值和平均值
   const maxVolume = hasData ? Math.max(...normalizedData.map(d => d.volume)) : 1000;
   const avgVolume = hasData ? normalizedData.reduce((sum, d) => sum + d.volume, 0) / normalizedData.length : 1000;
+
+  // 找出當前盤面的最高價和最低價的位置（標記在平均價線上）
+  let highestPoint: { time: string; price: number } | null = null;
+  let lowestPoint: { time: string; price: number } | null = null;
+  if (hasData && normalizedData.length > 0) {
+    const highestPrice = Math.max(...normalizedData.map(d => d.high));
+    const lowestPrice = Math.min(...normalizedData.map(d => d.low));
+    const highPoint = normalizedData.find(d => d.high === highestPrice);
+    const lowPoint = normalizedData.find(d => d.low === lowestPrice);
+    
+    if (highPoint) {
+      highestPoint = { time: highPoint.time, price: highestPrice };
+    }
+    if (lowPoint) {
+      lowestPoint = { time: lowPoint.time, price: lowestPrice };
+    }
+  }
 
   // 決定線條顏色：根據成交量決定（藍色 -> 黃色 -> 紅色）
   let lineColor: string;
@@ -271,15 +330,44 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
             }}
           />
           
-          {/* 左側 Y 軸：價格 */}
+          {/* 左側 Y 軸：價格（以基準價為中心，1% 為間隔，基準以上紅色，以下綠色） */}
           <YAxis 
             yAxisId="price"
-            domain={[minPrice, maxPrice]}
-            tick={{ fontSize: 11, fill: '#6b7280' }}
+            type="number"
+            domain={yAxisDomain}
+            ticks={yAxisTicks.length > 0 ? yAxisTicks : undefined}
+            tick={(props) => {
+              const { x, y, payload } = props;
+              const value = payload.value;
+              // 基準以上顯示紅色，基準以下顯示綠色，基準本身顯示黑色
+              let color = '#6b7280'; // 預設灰色
+              if (referencePrice && referencePrice > 0) {
+                if (value > referencePrice) {
+                  color = '#ef4444'; // 紅色
+                } else if (value < referencePrice) {
+                  color = '#22c55e'; // 綠色
+                } else {
+                  color = '#1f2937'; // 黑色（基準價）
+                }
+              }
+              return (
+                <text 
+                  x={x} 
+                  y={y} 
+                  dx={-5} 
+                  dy={4} 
+                  textAnchor="end" 
+                  fontSize={11} 
+                  fill={color}
+                >
+                  {value.toFixed(0)}
+                </text>
+              );
+            }}
             tickLine={false}
             axisLine={{ stroke: '#e5e7eb' }}
-            tickFormatter={(value) => value.toFixed(0)}
             width={60}
+            allowDataOverflow={false}
           />
           
           {/* 右側 Y 軸：成交量（隱藏） */}
@@ -356,8 +444,49 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
             activeDot={{ r: 4, fill: lineColor, strokeWidth: 2, stroke: '#fff' }}
             hide={false}
             connectNulls={false}
-            opacity={0.7}
           />
+          
+          {/* 標記最高價位置 */}
+          {highestPoint && (
+            <ReferenceDot
+              x={highestPoint.time}
+              y={highestPoint.price}
+              yAxisId="price"
+              r={0}
+              fill="transparent"
+              stroke="transparent"
+              strokeWidth={0}
+              label={{
+                value: highestPoint.price.toFixed(0),
+                position: 'top',
+                fill: '#ef4444',
+                fontSize: 11,
+                fontWeight: 400,
+                offset: 5
+              }}
+            />
+          )}
+          
+          {/* 標記最低價位置 */}
+          {lowestPoint && (
+            <ReferenceDot
+              x={lowestPoint.time}
+              y={lowestPoint.price}
+              yAxisId="price"
+              r={0}
+              fill="transparent"
+              stroke="transparent"
+              strokeWidth={0}
+              label={{
+                value: lowestPoint.price.toFixed(0),
+                position: 'bottom',
+                fill: '#22c55e',
+                fontSize: 11,
+                fontWeight: 400,
+                offset: 5
+              }}
+            />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
     </div>
