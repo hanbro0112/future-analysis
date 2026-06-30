@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceDot } from 'recharts'
 import type { MinuteChartPoint, AnalysisResult } from '../types/minuteData'
 
 interface MinuteChartProps {
-  data: MinuteChartPoint[]
+  data: MinuteChartPoint[] // 當前市場類型的資料（保持向後兼容）
+  dayData?: MinuteChartPoint[] // 日盤資料（可選）
+  nightData?: MinuteChartPoint[] // 夜盤資料（可選）
   title?: string
   marketType?: 'regular' | 'after_hours' // 市場類型：日盤或夜盤
   latestAnalysis?: AnalysisResult | null // 最新的分析結果（用於決定線條顏色）
@@ -113,7 +115,7 @@ const CustomTooltip = ({ active, payload }: any) => {
  * - 高低價格淡色線
  * - 成交量柱狀圖背景
  */
-export default function MinuteChart({ data, title = '分鐘級走勢', marketType = 'regular', latestAnalysis = null, isLoading = false, referencePrice }: MinuteChartProps) {
+export default function MinuteChart({ data, dayData, nightData, title = '分鐘級走勢', marketType = 'regular', latestAnalysis = null, isLoading = false, referencePrice }: MinuteChartProps) {
   // 控制是否顯示高低價線（日盤預設開啟，夜盤預設關閉）
   const [showHighLow, setShowHighLow] = useState(marketType === 'regular');
   
@@ -122,78 +124,485 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
     setShowHighLow(marketType === 'regular');
   }, [marketType]);
   
-  // 處理並標準化時間格式為 'HH:mm'
-  const normalizedData = data.map(item => {
-    let timeStr = item.time;
-    
-    // 處理 HHMM 格式（沒有冒號）
-    if (!timeStr.includes(':')) {
-      if (timeStr.length === 4) {
-        timeStr = `${timeStr.slice(0, 2)}:${timeStr.slice(2)}`;
-      } else if (timeStr.length === 3) {
-        timeStr = `0${timeStr.slice(0, 1)}:${timeStr.slice(1)}`;
+  // 判斷是否使用預先計算模式（有提供日盤和夜盤數據）
+  const usePrecomputedMode = dayData !== undefined && nightData !== undefined;
+  
+  // 處理並標準化時間格式為 'HH:mm' - 為每個市場類型分別處理
+  const normalizedDayData = useMemo(() => {
+    if (!usePrecomputedMode || !dayData) return [];
+    return dayData.map(item => {
+      let timeStr = item.time;
+      if (!timeStr.includes(':')) {
+        if (timeStr.length === 4) {
+          timeStr = `${timeStr.slice(0, 2)}:${timeStr.slice(2)}`;
+        } else if (timeStr.length === 3) {
+          timeStr = `0${timeStr.slice(0, 1)}:${timeStr.slice(1)}`;
+        }
       }
-    }
-    
-    return {
-      ...item,
-      time: timeStr
-    };
-  });
+      return { ...item, time: timeStr };
+    });
+  }, [dayData, usePrecomputedMode]);
 
-  // 生成完整的時間範圍（固定範圍）
-  const generateFullTimeRange = () => {
+  const normalizedNightData = useMemo(() => {
+    if (!usePrecomputedMode || !nightData) return [];
+    return nightData.map(item => {
+      let timeStr = item.time;
+      if (!timeStr.includes(':')) {
+        if (timeStr.length === 4) {
+          timeStr = `${timeStr.slice(0, 2)}:${timeStr.slice(2)}`;
+        } else if (timeStr.length === 3) {
+          timeStr = `0${timeStr.slice(0, 1)}:${timeStr.slice(1)}`;
+        }
+      }
+      return { ...item, time: timeStr };
+    });
+  }, [nightData, usePrecomputedMode]);
+  
+  // 處理並標準化時間格式為 'HH:mm' - 單一數據集模式（向後兼容）
+  const normalizedData = useMemo(() => {
+    if (usePrecomputedMode) {
+      // 預先計算模式：根據 marketType 選擇對應的數據
+      return marketType === 'regular' ? normalizedDayData : normalizedNightData;
+    }
+    // 單一數據集模式
+    return data.map(item => {
+      let timeStr = item.time;
+      
+      // 處理 HHMM 格式（沒有冒號）
+      if (!timeStr.includes(':')) {
+        if (timeStr.length === 4) {
+          timeStr = `${timeStr.slice(0, 2)}:${timeStr.slice(2)}`;
+        } else if (timeStr.length === 3) {
+          timeStr = `0${timeStr.slice(0, 1)}:${timeStr.slice(1)}`;
+        }
+      }
+      
+      return {
+        ...item,
+        time: timeStr
+      };
+    });
+  }, [data, usePrecomputedMode, marketType, normalizedDayData, normalizedNightData]);
+
+  // 生成完整的時間範圍（固定範圍）- 為兩個市場類型分別生成
+  const dayTimeRange = useMemo(() => {
     const times: string[] = [];
-    
-    if (marketType === 'regular') {
-      // 日盤：08:45 - 13:45
-      for (let h = 8; h <= 13; h++) {
-        const startMin = h === 8 ? 45 : 0;
-        const endMin = h === 13 ? 45 : 59;
-        for (let m = startMin; m <= endMin; m++) {
-          times.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
-        }
-      }
-    } else {
-      // 夜盤：15:00 - 05:00（跨日）
-      // 15:00 - 23:59
-      for (let h = 15; h <= 23; h++) {
-        for (let m = 0; m <= 59; m++) {
-          times.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
-        }
-      }
-      // 00:00 - 05:00
-      for (let h = 0; h <= 5; h++) {
-        for (let m = 0; m <= 59; m++) {
-          times.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
-        }
+    // 日盤：08:45 - 13:45
+    for (let h = 8; h <= 13; h++) {
+      const startMin = h === 8 ? 45 : 0;
+      const endMin = h === 13 ? 45 : 59;
+      for (let m = startMin; m <= endMin; m++) {
+        times.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
       }
     }
-    
     return times;
-  };
+  }, []);
 
-  const fullTimeRange = generateFullTimeRange();
+  const nightTimeRange = useMemo(() => {
+    const times: string[] = [];
+    // 夜盤：15:00 - 05:00（跨日）
+    // 15:00 - 23:59
+    for (let h = 15; h <= 23; h++) {
+      for (let m = 0; m <= 59; m++) {
+        times.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+      }
+    }
+    // 00:00 - 05:00
+    for (let h = 0; h <= 5; h++) {
+      for (let m = 0; m <= 59; m++) {
+        times.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+      }
+    }
+    return times;
+  }, []);
 
-  // 建立資料查找表
-  const dataMap = new Map(normalizedData.map(item => [item.time, item]));
+  // 根據當前市場類型選擇時間範圍（向後兼容）
+  const fullTimeRange = marketType === 'regular' ? dayTimeRange : nightTimeRange;
 
-  // 填充完整時間範圍的資料（沒有資料的時段設為 null）
-  const chartData = fullTimeRange.map(time => {
-    const dataPoint = dataMap.get(time);
-    return dataPoint || {
-      time,
-      avg_price: null as number | null,
-      high: null as number | null,
-      low: null as number | null,
-      volume: 0,
-      buy_volume: 0,
-      sell_volume: 0
+  // 計算價格範圍（用於設定 Y 軸）
+  const hasData = normalizedData && normalizedData.length > 0;
+
+  // 計算平均成交量（用於顏色計算）- 為兩個市場類型分別計算
+  const dayAvgVolume = useMemo(() => {
+    if (!usePrecomputedMode || normalizedDayData.length === 0) return 1000;
+    return normalizedDayData.reduce((sum, d) => sum + d.volume, 0) / normalizedDayData.length;
+  }, [normalizedDayData, usePrecomputedMode]);
+
+  const nightAvgVolume = useMemo(() => {
+    if (!usePrecomputedMode || normalizedNightData.length === 0) return 1000;
+    return normalizedNightData.reduce((sum, d) => sum + d.volume, 0) / normalizedNightData.length;
+  }, [normalizedNightData, usePrecomputedMode]);
+
+  const avgVolume = usePrecomputedMode 
+    ? (marketType === 'regular' ? dayAvgVolume : nightAvgVolume)
+    : (hasData ? normalizedData.reduce((sum, d) => sum + d.volume, 0) / normalizedData.length : 1000);
+
+  // 函數：計算 chartData 和 lineSegments
+  const computeChartDataAndSegments = useCallback((
+    dataArray: MinuteChartPoint[],
+    timeRange: string[],
+    avgVol: number
+  ) => {
+    const dataMap = new Map(dataArray.map(item => [item.time, item]));
+
+    const chart = timeRange.map(time => {
+      const dataPoint = dataMap.get(time);
+      if (dataPoint) {
+        const volumeRatio = dataPoint.volume / avgVol;
+        const color = getVolumeColor(volumeRatio);
+        return {
+          ...dataPoint,
+          color
+        };
+      }
+      return {
+        time,
+        avg_price: null as number | null,
+        high: null as number | null,
+        low: null as number | null,
+        volume: 0,
+        buy_volume: 0,
+        sell_volume: 0,
+        color: '#3b82f6'
+      };
+    });
+
+    // 第一步：生成所有線段（相鄰的點之間）
+    let segmentIndex = 0;
+    const allSegments: Array<{ idx: number; color: string }> = [];
+    
+    for (let i = 0; i < chart.length - 1; i++) {
+      const current = chart[i];
+      const next = chart[i + 1];
+      
+      if (current.avg_price !== null && next.avg_price !== null) {
+        allSegments.push({
+          idx: i,
+          color: current.color
+        });
+      }
+    }
+
+    // 第二步：合併連續相同顏色的線段
+    const mergedSegments: Array<{ startIdx: number; endIdx: number; color: string }> = [];
+    let currentMerged: { startIdx: number; endIdx: number; color: string } | null = null;
+    
+    allSegments.forEach((seg) => {
+      if (!currentMerged) {
+        currentMerged = { startIdx: seg.idx, endIdx: seg.idx + 1, color: seg.color };
+      } else if (currentMerged.color === seg.color && currentMerged.endIdx === seg.idx) {
+        // 同色且連續，延伸區段
+        currentMerged.endIdx = seg.idx + 1;
+      } else {
+        // 顏色改變或不連續，儲存前一個區段
+        mergedSegments.push(currentMerged);
+        currentMerged = { startIdx: seg.idx, endIdx: seg.idx + 1, color: seg.color };
+      }
+    });
+    
+    if (currentMerged) {
+      mergedSegments.push(currentMerged);
+    }
+
+    // 第三步：為合併後的線段生成 dataKey
+    const finalSegments: Array<{ dataKey: string; color: string }> = [];
+    mergedSegments.forEach((merged, mergedIdx) => {
+      const dataKey = `merged_${mergedIdx}`;
+      
+      // 為這個合併線段涵蓋的所有點添加 dataKey
+      for (let i = merged.startIdx; i <= merged.endIdx; i++) {
+        if (i < chart.length && chart[i].avg_price !== null) {
+          (chart[i] as any)[dataKey] = chart[i].avg_price;
+        }
+      }
+      
+      finalSegments.push({
+        dataKey,
+        color: merged.color
+      });
+    });
+
+    console.log(`[計算] 原始線段: ${allSegments.length}, 合併後: ${finalSegments.length}`);
+    return { chartData: chart, lineSegments: finalSegments };
+  }, []);
+
+  // 使用 useRef 保存預先計算的結果（支持增量更新）
+  const dayChartRef = useRef<{
+    normalizedData: MinuteChartPoint[];
+    chartData: any[];
+    lineSegments: Array<{ dataKey: string; color: string }>;
+  } | null>(null);
+  
+  const nightChartRef = useRef<{
+    normalizedData: MinuteChartPoint[];
+    chartData: any[];
+    lineSegments: Array<{ dataKey: string; color: string }>;
+  } | null>(null);
+
+  // 為日盤預先計算（支持增量更新）
+  const dayChartResult = useMemo(() => {
+    if (!usePrecomputedMode) return { chartData: [], lineSegments: [] };
+    
+    const prev = dayChartRef.current;
+    
+    // 如果數據長度沒變，直接返回上次結果（避免不必要的重新計算）
+    if (prev && prev.normalizedData.length === normalizedDayData.length) {
+      return { chartData: prev.chartData, lineSegments: prev.lineSegments };
+    }
+    
+    const canIncremental = prev && 
+      prev.normalizedData.length > 0 &&
+      normalizedDayData.length > prev.normalizedData.length &&
+      normalizedDayData.length - prev.normalizedData.length <= 2;
+    
+    if (canIncremental) {
+      console.log('[日盤] 增量更新，新增', normalizedDayData.length - prev!.normalizedData.length, '筆');
+      // 複製前一次的結果
+      const chart = [...prev!.chartData];
+      const segments = [...prev!.lineSegments];
+      
+      // 只處理新增的資料點
+      const newPoints = normalizedDayData.slice(prev!.normalizedData.length);
+      
+      newPoints.forEach(point => {
+        const timeIndex = dayTimeRange.indexOf(point.time);
+        if (timeIndex >= 0) {
+          const volumeRatio = point.volume / dayAvgVolume;
+          const color = getVolumeColor(volumeRatio);
+          chart[timeIndex] = {
+            ...point,
+            color
+          };
+          
+          // 檢查是否需要新增線段（與前一個點連接）
+          if (timeIndex > 0 && chart[timeIndex - 1].avg_price !== null) {
+            const prevColor = chart[timeIndex - 1].color;
+            const lastSeg = segments[segments.length - 1];
+            
+            // 如果與最後一個線段同色，延伸該線段
+            if (lastSeg && lastSeg.color === prevColor) {
+              const lastDataKey = lastSeg.dataKey;
+              (chart[timeIndex] as any)[lastDataKey] = point.avg_price;
+            } else {
+              // 否則建立新線段
+              const newDataKey = `merged_${segments.length}`;
+              (chart[timeIndex - 1] as any)[newDataKey] = chart[timeIndex - 1].avg_price;
+              (chart[timeIndex] as any)[newDataKey] = point.avg_price;
+              segments.push({ dataKey: newDataKey, color: prevColor });
+            }
+          }
+        }
+      });
+      
+      const result = { chartData: chart, lineSegments: segments };
+      dayChartRef.current = {
+        normalizedData: normalizedDayData,
+        chartData: chart,
+        lineSegments: segments
+      };
+      return result;
+    }
+    
+    // 完整計算
+    console.log('[日盤] 完整計算，共', normalizedDayData.length, '筆資料');
+    const result = computeChartDataAndSegments(normalizedDayData, dayTimeRange, dayAvgVolume);
+    dayChartRef.current = {
+      normalizedData: normalizedDayData,
+      chartData: result.chartData,
+      lineSegments: result.lineSegments
     };
-  });
+    return result;
+  }, [normalizedDayData, dayTimeRange, dayAvgVolume, usePrecomputedMode, computeChartDataAndSegments]);
+
+  // 為夜盤預先計算（支持增量更新）
+  const nightChartResult = useMemo(() => {
+    if (!usePrecomputedMode) return { chartData: [], lineSegments: [] };
+    
+    const prev = nightChartRef.current;
+    
+    // 如果數據長度沒變，直接返回上次結果（避免不必要的重新計算）
+    if (prev && prev.normalizedData.length === normalizedNightData.length) {
+      return { chartData: prev.chartData, lineSegments: prev.lineSegments };
+    }
+    
+    const canIncremental = prev && 
+      prev.normalizedData.length > 0 &&
+      normalizedNightData.length > prev.normalizedData.length &&
+      normalizedNightData.length - prev.normalizedData.length <= 2;
+    
+    if (canIncremental) {
+      console.log('[夜盤] 增量更新，新增', normalizedNightData.length - prev!.normalizedData.length, '筆');
+      // 複製前一次的結果
+      const chart = [...prev!.chartData];
+      const segments = [...prev!.lineSegments];
+      
+      // 只處理新增的資料點
+      const newPoints = normalizedNightData.slice(prev!.normalizedData.length);
+      
+      newPoints.forEach(point => {
+        const timeIndex = nightTimeRange.indexOf(point.time);
+        if (timeIndex >= 0) {
+          const volumeRatio = point.volume / nightAvgVolume;
+          const color = getVolumeColor(volumeRatio);
+          chart[timeIndex] = {
+            ...point,
+            color
+          };
+          
+          // 檢查是否需要新增線段（與前一個點連接）
+          if (timeIndex > 0 && chart[timeIndex - 1].avg_price !== null) {
+            const prevColor = chart[timeIndex - 1].color;
+            const lastSeg = segments[segments.length - 1];
+            
+            // 如果與最後一個線段同色，延伸該線段
+            if (lastSeg && lastSeg.color === prevColor) {
+              const lastDataKey = lastSeg.dataKey;
+              (chart[timeIndex] as any)[lastDataKey] = point.avg_price;
+            } else {
+              // 否則建立新線段
+              const newDataKey = `merged_${segments.length}`;
+              (chart[timeIndex - 1] as any)[newDataKey] = chart[timeIndex - 1].avg_price;
+              (chart[timeIndex] as any)[newDataKey] = point.avg_price;
+              segments.push({ dataKey: newDataKey, color: prevColor });
+            }
+          }
+        }
+      });
+      
+      const result = { chartData: chart, lineSegments: segments };
+      nightChartRef.current = {
+        normalizedData: normalizedNightData,
+        chartData: chart,
+        lineSegments: segments
+      };
+      return result;
+    }
+    
+    // 完整計算
+    console.log('[夜盤] 完整計算，共', normalizedNightData.length, '筆資料');
+    const result = computeChartDataAndSegments(normalizedNightData, nightTimeRange, nightAvgVolume);
+    nightChartRef.current = {
+      normalizedData: normalizedNightData,
+      chartData: result.chartData,
+      lineSegments: result.lineSegments
+    };
+    return result;
+  }, [normalizedNightData, nightTimeRange, nightAvgVolume, usePrecomputedMode, computeChartDataAndSegments]);
+
+  // 使用 useRef 保存上一次的資料和計算結果（單一數據集模式的增量更新）
+  const prevDataRef = useRef<{
+    normalizedData: MinuteChartPoint[];
+    fullTimeRange: string[];
+    avgVolume: number;
+    chartData: any[];
+    lineSegments: Array<{ dataKey: string; color: string }>;
+  } | null>(null);
+
+  // 最終的 chartData 和 lineSegments
+  const { chartData, lineSegments } = useMemo(() => {
+    // 預先計算模式：直接返回對應的結果（不重新計算）
+    if (usePrecomputedMode) {
+      const result = marketType === 'regular' ? dayChartResult : nightChartResult;
+      console.log(`[使用] ${marketType === 'regular' ? '日盤' : '夜盤'} 預計算結果:`, result.lineSegments.length, '個線段');
+      return result;
+    }
+
+    // 單一數據集模式：支持增量更新
+    const prev = prevDataRef.current;
+    
+    const canIncrementalUpdate = prev &&
+      prev.fullTimeRange === fullTimeRange &&
+      normalizedData.length > 0 &&
+      prev.normalizedData.length > 0 &&
+      normalizedData.length - prev.normalizedData.length <= 2 &&
+      normalizedData.length >= prev.normalizedData.length;
+    
+    if (canIncrementalUpdate) {
+      // 增量更新：只更新最後變化的部分
+      const chart = [...prev.chartData];
+      const segments = [...prev.lineSegments];
+      
+      // 找出需要更新的時間範圍（最後幾筆資料）
+      const updateStartIndex = Math.max(0, prev.normalizedData.length - 2);
+      const newDataItems = normalizedData.slice(updateStartIndex);
+      
+      // 更新受影響的 chartData 點
+      newDataItems.forEach(dataPoint => {
+        const timeIndex = fullTimeRange.indexOf(dataPoint.time);
+        if (timeIndex >= 0) {
+          const volumeRatio = dataPoint.volume / avgVolume;
+          const color = getVolumeColor(volumeRatio);
+          chart[timeIndex] = {
+            ...dataPoint,
+            color
+          };
+        }
+      });
+      
+      // 移除受影響的舊線段（最後2個線段可能需要重繪）
+      const removeCount = Math.min(2, segments.length);
+      if (removeCount > 0) {
+        segments.splice(segments.length - removeCount, removeCount);
+      }
+      
+      // 找出需要重新生成線段的起始位置
+      const segmentStartIndex = Math.max(0, prev.normalizedData.length - 3);
+      let segmentIndex = segments.length;
+      
+      // 重新生成受影響的線段
+      for (let i = segmentStartIndex; i < chart.length - 1; i++) {
+        const current = chart[i];
+        const next = chart[i + 1];
+        
+        if (current.avg_price !== null && next.avg_price !== null) {
+          const dataKey = `segment_${segmentIndex}`;
+          
+          // 清除舊的 dataKey（如果存在）
+          delete (chart[i] as any)[dataKey];
+          delete (chart[i + 1] as any)[dataKey];
+          
+          // 添加新的 dataKey
+          (chart[i] as any)[dataKey] = current.avg_price;
+          (chart[i + 1] as any)[dataKey] = next.avg_price;
+          
+          segments.push({
+            dataKey,
+            color: current.color
+          });
+          
+          segmentIndex++;
+        }
+      }
+      
+      // 保存結果到 ref
+      prevDataRef.current = {
+        normalizedData,
+        fullTimeRange,
+        avgVolume,
+        chartData: chart,
+        lineSegments: segments
+      };
+      
+      return { chartData: chart, lineSegments: segments };
+    }
+    
+    // 完整計算：使用共用函數
+    const result = computeChartDataAndSegments(normalizedData, fullTimeRange, avgVolume);
+    
+    // 保存結果到 ref
+    prevDataRef.current = {
+      normalizedData,
+      fullTimeRange,
+      avgVolume,
+      chartData: result.chartData,
+      lineSegments: result.lineSegments
+    };
+
+    return result;
+  }, [normalizedData, fullTimeRange, avgVolume, usePrecomputedMode, marketType, dayChartResult, nightChartResult, computeChartDataAndSegments]);
 
   // 生成整點刻度（用於橫軸標籤）
-  const generateHourTicks = () => {
+  const hourTicks = useMemo(() => {
     if (marketType === 'regular') {
       // 日盤：08-13（整點）
       return ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00'];
@@ -201,12 +610,9 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
       // 夜盤：15-05（整點，跨日）
       return ['15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00', '00:00', '01:00', '02:00', '03:00', '04:00', '05:00'];
     }
-  };
+  }, [marketType]);
 
-  const hourTicks = generateHourTicks();
-
-  // 計算價格範圍（用於設定 Y 軸）
-  const hasData = normalizedData && normalizedData.length > 0;
+  // 計算價格資料
   const prices = hasData ? normalizedData.flatMap(d => [d.avg_price, d.high, d.low]) : [20000, 22000];
   
   // 計算 Y 軸範圍和刻度（以基準價為中心，1% 為間隔）
@@ -254,9 +660,8 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
     yAxisTicks = [];
   }
 
-  // 計算成交量最大值和平均值
+  // 計算成交量最大值
   const maxVolume = hasData ? Math.max(...normalizedData.map(d => d.volume)) : 1000;
-  const avgVolume = hasData ? normalizedData.reduce((sum, d) => sum + d.volume, 0) / normalizedData.length : 1000;
 
   // 找出當前盤面的最高價和最低價的位置（標記在平均價線上）
   let highestPoint: { time: string; price: number } | null = null;
@@ -273,17 +678,6 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
     if (lowPoint) {
       lowestPoint = { time: lowPoint.time, price: lowestPrice };
     }
-  }
-
-  // 決定線條顏色：根據成交量決定（藍色 -> 黃色 -> 紅色）
-  let lineColor: string;
-  if (hasData && normalizedData.length > 0) {
-    // 使用最新一筆資料的成交量
-    const latestVolume = normalizedData[normalizedData.length - 1].volume;
-    const volumeRatio = latestVolume / avgVolume;
-    lineColor = getVolumeColor(volumeRatio);
-  } else {
-    lineColor = '#3b82f6'; // 預設藍色
   }
 
   return (
@@ -434,18 +828,22 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
             />
           )}
           
-          {/* 平均價線（主線，根據市場情緒顯示顏色，台灣風格） */}
-          <Line 
-            yAxisId="price"
-            type="monotone" 
-            dataKey="avg_price" 
-            stroke={lineColor}
-            strokeWidth={2}
-            dot={false}
-            activeDot={{ r: 4, fill: lineColor, strokeWidth: 2, stroke: '#fff' }}
-            hide={false}
-            connectNulls={false}
-          />
+          {/* 平均價線（多段線，每段根據該分鐘的成交量顯示不同顏色） */}
+          {lineSegments.map((segment, index) => (
+            <Line 
+              key={segment.dataKey}
+              yAxisId="price"
+              type="monotone" 
+              dataKey={segment.dataKey}
+              stroke={segment.color}
+              strokeWidth={2}
+              dot={false}
+              activeDot={false}
+              hide={false}
+              connectNulls={false}
+              isAnimationActive={false}
+            />
+          ))}
           
           {/* 標記最高價位置 */}
           {highestPoint && referencePrice && (

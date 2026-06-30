@@ -5,7 +5,7 @@
  * 顯示台指期分鐘級走勢圖與報價資訊
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import QuoteCard from './components/QuoteCard';
 import MinuteChart from './components/MinuteChart';
 
@@ -201,6 +201,8 @@ export default function Home() {
   const [allMinuteData, setAllMinuteData] = useState<MinuteBar[]>([]); // 所有資料
   const [minuteData, setMinuteData] = useState<MinuteBar[]>([]); // 當前顯示的資料
   const [chartData, setChartData] = useState<MinuteChartPoint[]>([]);
+  const [dayChartData, setDayChartData] = useState<MinuteChartPoint[]>([]); // 日盤圖表資料
+  const [nightChartData, setNightChartData] = useState<MinuteChartPoint[]>([]); // 夜盤圖表資料
   const [quote, setQuote] = useState<TaifexQuote | null>(null);
   const [latestAnalysis, setLatestAnalysis] = useState<AnalysisResult | null>(null);
   const [latestTime, setLatestTime] = useState<string>('');
@@ -368,11 +370,39 @@ export default function Home() {
           const resolvedMarketType = resolveMarketType(data, defaultMarketType);
           setMarketType(resolvedMarketType);
 
+          // 分離日盤和夜盤數據
+          const dayData = data.filter(bar => bar.market_type === 'regular');
+          const nightData = data.filter(bar => bar.market_type === 'after_hours');
+
+          // 轉換為圖表資料 - 日盤
+          const dayChartPoints: MinuteChartPoint[] = dayData.map(bar => ({
+            time: bar.time,
+            avg_price: bar.avg_price,
+            high: bar.high,
+            low: bar.low,
+            volume: bar.volume,
+            buy_volume: bar.buy_volume,
+            sell_volume: bar.sell_volume
+          }));
+          setDayChartData(dayChartPoints);
+
+          // 轉換為圖表資料 - 夜盤
+          const nightChartPoints: MinuteChartPoint[] = nightData.map(bar => ({
+            time: bar.time,
+            avg_price: bar.avg_price,
+            high: bar.high,
+            low: bar.low,
+            volume: bar.volume,
+            buy_volume: bar.buy_volume,
+            sell_volume: bar.sell_volume
+          }));
+          setNightChartData(nightChartPoints);
+
           // 根據解析後的市場類型過濾資料
           const filteredData = data.filter(bar => bar.market_type === resolvedMarketType);
           setMinuteData(filteredData);
           
-          // 轉換為圖表資料
+          // 轉換為圖表資料（當前顯示的資料，保持向後兼容）
           const chartPoints: MinuteChartPoint[] = filteredData.map(bar => ({
             time: bar.time,
             avg_price: bar.avg_price,
@@ -425,9 +455,17 @@ export default function Home() {
     loadMinuteData();
   }, []);
 
+  // 使用 ref 追蹤定時器是否已啟動
+  const updateTimerRef = useRef<{ timeout?: NodeJS.Timeout; interval?: NodeJS.Timeout }>({});
+  const isUpdatingRef = useRef(false);
+  const timerInitializedRef = useRef(false);
+
   // 定期更新分鐘級資料（每分鐘03秒更新一次）
   useEffect(() => {
-    if (minuteData.length === 0) return;
+    // 只在首次有資料且未初始化時啟動定時器
+    if (minuteData.length === 0 || timerInitializedRef.current) return;
+    
+    timerInitializedRef.current = true;
 
     // 計算下一次更新時間（每分鐘的03秒）
     function getNextUpdateDelay() {
@@ -445,9 +483,17 @@ export default function Home() {
 
     // 更新資料函數（僅更新當前交易時段）
     async function updateData() {
+      // 防止重複執行
+      if (isUpdatingRef.current) {
+        return;
+      }
+      
+      isUpdatingRef.current = true;
+      
       // 檢查是否在交易時段內
       if (!isInTradingHours()) {
         console.log('⏸️ 非交易時段，跳過更新');
+        isUpdatingRef.current = false;
         return;
       }
 
@@ -494,6 +540,7 @@ export default function Home() {
 
           setMinuteData(filteredData);
 
+          // 更新當前顯示的圖表資料（向後兼容）
           const chartPoints: MinuteChartPoint[] = filteredData.map(bar => ({
             time: bar.time,
             avg_price: bar.avg_price,
@@ -504,6 +551,32 @@ export default function Home() {
             sell_volume: bar.sell_volume
           }));
           setChartData(chartPoints);
+
+          // 更新日盤和夜盤的圖表資料
+          const dayData = mergedData.filter(bar => bar.market_type === 'regular');
+          const nightData = mergedData.filter(bar => bar.market_type === 'after_hours');
+
+          const dayChartPoints: MinuteChartPoint[] = dayData.map(bar => ({
+            time: bar.time,
+            avg_price: bar.avg_price,
+            high: bar.high,
+            low: bar.low,
+            volume: bar.volume,
+            buy_volume: bar.buy_volume,
+            sell_volume: bar.sell_volume
+          }));
+          setDayChartData(dayChartPoints);
+
+          const nightChartPoints: MinuteChartPoint[] = nightData.map(bar => ({
+            time: bar.time,
+            avg_price: bar.avg_price,
+            high: bar.high,
+            low: bar.low,
+            volume: bar.volume,
+            buy_volume: bar.buy_volume,
+            sell_volume: bar.sell_volume
+          }));
+          setNightChartData(nightChartPoints);
           
           // 更新報價資訊（依目前盤面，使用參考價）
           const quoteData = generateQuoteFromMinuteData(filteredData, currentRefPrice ?? 0);
@@ -526,6 +599,8 @@ export default function Home() {
         }
       } catch (error) {
         console.error('更新資料失敗:', error);
+      } finally {
+        isUpdatingRef.current = false;
       }
     }
 
@@ -536,12 +611,22 @@ export default function Home() {
       
       // 之後每60秒更新一次（在每分鐘的03秒）
       const interval = setInterval(updateData, 60000);
-      
-      return () => clearInterval(interval);
+      updateTimerRef.current.interval = interval;
     }, firstDelay);
+    
+    updateTimerRef.current.timeout = firstTimeout;
 
-    return () => clearTimeout(firstTimeout);
-  }, [minuteData.length, marketType, isMarketTypeManuallySelected]);
+    return () => {
+      if (updateTimerRef.current.timeout) {
+        clearTimeout(updateTimerRef.current.timeout);
+      }
+      if (updateTimerRef.current.interval) {
+        clearInterval(updateTimerRef.current.interval);
+      }
+      updateTimerRef.current = {};
+      timerInitializedRef.current = false;
+    };
+  }, [minuteData.length]);
 
   // 切換市場類型（日盤/夜盤）
   const handleMarketTypeChange = async (newMarketType: 'regular' | 'after_hours') => {
@@ -644,7 +729,9 @@ export default function Home() {
               {/* 右側：分鐘級走勢圖 */}
               <div className="lg:col-span-2">
                 <MinuteChart 
-                  data={chartData} 
+                  data={chartData}
+                  dayData={dayChartData}
+                  nightData={nightChartData}
                   title="台指期分鐘級走勢"
                   marketType={marketType}
                   latestAnalysis={latestAnalysis}
