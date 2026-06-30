@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # 添加 apps 目�
 
 from datetime import datetime
 from decimal import Decimal
+import threading
 
 from config import config
 from pubsub import PubSubSubscriber
@@ -57,6 +58,10 @@ def dict_to_tick(data: dict) -> TickData:
 
 
 def main():
+    # 定時器控制
+    flush_timer = None
+    timer_lock = threading.Lock()
+    
     try:
         # 初始化 Firestore Writer
         firestore_writer = FirestoreWriter(
@@ -116,6 +121,23 @@ def main():
         # 初始化分鐘聚合器
         aggregator = MinuteAggregator(on_minute_complete=on_minute_complete)
         
+        # 定義定時自動 flush 函數（在 aggregator 初始化之後）
+        def schedule_auto_flush():
+            """定時檢查並自動 flush（每 30 秒執行一次）"""
+            nonlocal flush_timer
+            
+            try:
+                aggregator.auto_flush_if_needed(delay_minutes=1.5)
+            except Exception as e:
+                print(f"⚠️  自動 flush 時發生錯誤: {e}")
+            
+            # 重新排程下一次檢查
+            with timer_lock:
+                if flush_timer is not None:  # 確認沒有被取消
+                    flush_timer = threading.Timer(30.0, schedule_auto_flush)
+                    flush_timer.daemon = True
+                    flush_timer.start()
+        
         topic_id = config['pubsub_topic_id']
         subscription_id = config['pubsub_subscription_id']
         project_id = config['gcp_project_id']
@@ -154,6 +176,13 @@ def main():
             project_id=project_id,
             subscription_id=subscription_id
         )
+        
+        # 啟動自動 flush 定時器
+        with timer_lock:
+            flush_timer = threading.Timer(30.0, schedule_auto_flush)
+            flush_timer.daemon = True
+            flush_timer.start()
+        print("⏰ 自動 flush 定時器已啟動（每 30 秒檢查一次）\n")
         
         # 定義訊息處理函數
         def handle_message(data: dict):
@@ -203,6 +232,11 @@ def main():
         
     except KeyboardInterrupt:
         print("\n\n👋 正在停止服務...")
+        # 停止定時器
+        with timer_lock:
+            if flush_timer is not None:
+                flush_timer.cancel()
+                flush_timer = None
         # 強制完成所有未完成的分鐘資料
         if 'aggregator' in locals():
             print("📦 正在完成剩餘的分鐘資料...")
@@ -211,6 +245,10 @@ def main():
         print(f"\n❌ 發生錯誤: {e}")
         sys.exit(1)
     finally:
+        # 清理定時器
+        with timer_lock:
+            if flush_timer is not None:
+                flush_timer.cancel()
         # 清理資源
         if 'firestore_writer' in locals():
             firestore_writer.close()

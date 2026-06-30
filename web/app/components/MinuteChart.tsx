@@ -219,30 +219,32 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
     const dataMin = Math.min(...prices);
     const dataMax = Math.max(...prices);
     
-    // 初始刻度範圍：±2%（刻度只顯示到 ±2%）
-    let rangeSteps = 2;
+    // 初始刻度範圍：±1%（刻度只顯示到 ±1%）
+    let rangeStepsAbove = 1;
+    let rangeStepsBelow = 1;
     
-    // 檢查數據是否超出 ±2% 範圍，如果超出則擴增
+    // 檢查數據是否超出 ±1% 範圍，單向擴增到整數百分比
     const rangeAbove = (dataMax - referencePrice) / onePercent;
     const rangeBelow = (referencePrice - dataMin) / onePercent;
-    const maxDataRange = Math.max(rangeAbove, rangeBelow);
     
-    // 如果數據超出 ±2%，擴增到數據範圍 +1%
-    if (maxDataRange > 2) {
-      rangeSteps = Math.ceil(maxDataRange) + 1;
+    // 如果數據超出 ±1%，單向擴增到達到的整數百分比
+    if (rangeAbove > 1) {
+      rangeStepsAbove = Math.ceil(rangeAbove);
+    }
+    if (rangeBelow > 1) {
+      rangeStepsBelow = Math.ceil(rangeBelow);
     }
     
-    // 生成 Y 軸刻度（基準價在中間，只顯示到 ±rangeSteps）
+    // 生成 Y 軸刻度（基準價在中間，從 -rangeStepsBelow 到 +rangeStepsAbove）
     yAxisTicks = [];
-    for (let i = -rangeSteps; i <= rangeSteps; i++) {
+    for (let i = -rangeStepsBelow; i <= rangeStepsAbove; i++) {
       yAxisTicks.push(referencePrice + i * onePercent);
     }
     
     // Y 軸實際顯示範圍：比刻度多 0.5%
-    const domainRange = rangeSteps + 0.5;
     yAxisDomain = [
-      referencePrice - domainRange * onePercent,
-      referencePrice + domainRange * onePercent
+      referencePrice - (rangeStepsBelow + 0.5) * onePercent,
+      referencePrice + (rangeStepsAbove + 0.5) * onePercent
     ];
   } else {
     // 無基準價時，使用原本的自動範圍
@@ -386,8 +388,7 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
             iconSize={10}
             payload={[
               { value: '成交量', type: 'rect', color: '#3b82f6' },
-              { value: '最低價', type: 'line', color: '#374151' },
-              { value: '最高價', type: 'line', color: '#374151' }
+              { value: '區間高低價', type: 'line', color: '#374151' }
             ]}
           />
           
@@ -411,7 +412,7 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
               strokeWidth={1}
               dot={false}
               strokeDasharray="3 3"
-              name="最低價"
+              name="區間高低價"
               opacity={0.6}
               connectNulls={false}
             />
@@ -427,7 +428,7 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
               strokeWidth={1}
               dot={false}
               strokeDasharray="3 3"
-              name="最高價"
+              name="區間高低價"
               opacity={0.6}
               connectNulls={false}
             />
@@ -447,7 +448,7 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
           />
           
           {/* 標記最高價位置 */}
-          {highestPoint && (
+          {highestPoint && referencePrice && (
             <ReferenceDot
               x={highestPoint.time}
               y={highestPoint.price}
@@ -459,7 +460,7 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
               label={{
                 value: highestPoint.price.toFixed(0),
                 position: 'top',
-                fill: '#ef4444',
+                fill: '#374151',
                 fontSize: 11,
                 fontWeight: 400,
                 offset: 5
@@ -468,7 +469,7 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
           )}
           
           {/* 標記最低價位置 */}
-          {lowestPoint && (
+          {lowestPoint && referencePrice && (
             <ReferenceDot
               x={lowestPoint.time}
               y={lowestPoint.price}
@@ -480,7 +481,7 @@ export default function MinuteChart({ data, title = '分鐘級走勢', marketTyp
               label={{
                 value: lowestPoint.price.toFixed(0),
                 position: 'bottom',
-                fill: '#22c55e',
+                fill: '#374151',
                 fontSize: 11,
                 fontWeight: 400,
                 offset: 5

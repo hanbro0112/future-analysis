@@ -244,6 +244,55 @@ class MinuteAggregator:
             # 盤前或休市時段，預設為 regular
             return 'regular'
     
+    def should_flush(self, delay_minutes: float = 1.5) -> bool:
+        """
+        檢查是否應該執行 flush（當前時間超過最後一個 tick 的時間一定分鐘數）
+        
+        Args:
+            delay_minutes: 延遲分鐘數，預設 1.5 分鐘
+            
+        Returns:
+            是否需要 flush
+        """
+        if self.last_minute is None or not self.current_bars:
+            return False
+        
+        now = datetime.now()
+        time_diff = (now - self.last_minute).total_seconds() / 60.0
+        return time_diff >= delay_minutes
+    
+    def auto_flush_if_needed(self, delay_minutes: float = 1.5) -> List[MinuteBar]:
+        """
+        如果需要則自動 flush 所有應完成的分鐘資料
+        
+        Args:
+            delay_minutes: 延遲分鐘數，預設 1.5 分鐘
+            
+        Returns:
+            完成的 MinuteBar 列表
+        """
+        if not self.should_flush(delay_minutes):
+            return []
+        
+        now = datetime.now()
+        completed_bars = []
+        
+        for key in list(self.current_bars.keys()):
+            _, bar_minute = key
+            # 只 flush 明確已經過去的分鐘
+            if (now - bar_minute).total_seconds() >= delay_minutes * 60:
+                bar_data = self.current_bars.get(key)
+                tick_count = bar_data['tick_count'] if bar_data else 0
+                print(f"⏰ 自動完成分鐘 {bar_minute.strftime('%H:%M')} "
+                      f"(共 {tick_count} 筆 Tick, 成交量: {bar_data['volume'] if bar_data else 0})")
+                bar = self._finalize_bar(key)
+                if bar:
+                    completed_bars.append(bar)
+                    if self.on_minute_complete:
+                        self.on_minute_complete(bar)
+        
+        return completed_bars
+    
     def flush_all(self) -> List[MinuteBar]:
         """
         強制完成所有正在聚合的分鐘資料（用於程式結束時）

@@ -114,17 +114,21 @@ export async function getTodayDaySession(symbol: string): Promise<MinuteBar[]> {
 
 /**
  * 取得今日夜盤資料
- * 夜盤跨日邏輯：00:00-05:59 的資料儲存在前一天
+ * 夜盤跨日邏輯：
+ * - 00:00-14:49 使用前一天的夜盤資料
+ * - 14:50-23:59 使用當天的夜盤資料
  * @param symbol 商品代碼 (例如: MXF)
  * @returns 夜盤分鐘資料陣列
  */
 export async function getTodayNightSession(symbol: string): Promise<MinuteBar[]> {
   const now = new Date();
   const hour = now.getHours();
+  const minute = now.getMinutes();
+  const timeInMinutes = hour * 60 + minute;
   
-  // 夜盤跨日：如果當前時間在 00:00-05:59，使用前一天的日期
+  // 14:50 前使用前一天的日期
   let dateForQuery = now;
-  if (hour >= 0 && hour < 6) {
+  if (timeInMinutes < 14 * 60 + 50) {  // 小於 14:50
     dateForQuery = new Date(now);
     dateForQuery.setDate(dateForQuery.getDate() - 1);
   }
