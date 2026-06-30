@@ -209,7 +209,8 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [marketType, setMarketType] = useState<'regular' | 'after_hours'>(getDefaultMarketType()); // 根據當前時間判斷預設盤面
   const [isMarketTypeManuallySelected, setIsMarketTypeManuallySelected] = useState(false);
-  const [referencePrice, setReferencePrice] = useState<number | null>(null); // 漲跌幅參考價（前一時段收盤價）
+  const [dayReferencePrice, setDayReferencePrice] = useState<number | null>(null); // 日盤漲跌幅參考價
+  const [nightReferencePrice, setNightReferencePrice] = useState<number | null>(null); // 夜盤漲跌幅參考價
 
   const resolveMarketType = (
     data: MinuteBar[],
@@ -356,11 +357,9 @@ export default function Home() {
   useEffect(() => {
     async function loadMinuteData() {
       setIsLoading(true);
-      console.log('🚀 開始載入分鐘資料...');
       
       try {
         const data = await getTodayMinuteData('MXF'); // 台指期商品代碼
-        console.log('✅ 載入分鐘資料:', data.length, '筆');
         
         if (data.length > 0) {
           setAllMinuteData(data); // 儲存所有資料
@@ -414,11 +413,15 @@ export default function Home() {
           }));
           setChartData(chartPoints);
           
-          // 計算參考價格（用於漲跌幅計算）
-          const refPrice = await calculateReferencePrice(resolvedMarketType, data, filteredData);
-          setReferencePrice(refPrice);
+          // 計算日盤和夜盤的參考價格（用於漲跌幅計算）
+          const dayRefPrice = await calculateReferencePrice('regular', data, dayData);
+          const nightRefPrice = await calculateReferencePrice('after_hours', data, nightData);
+          setDayReferencePrice(dayRefPrice);
+          setNightReferencePrice(nightRefPrice);
+          console.log('📍 初始化基準價 - 日盤:', dayRefPrice, '夜盤:', nightRefPrice);
           
           // 更新報價資訊（依目前盤面）
+          const refPrice = resolvedMarketType === 'regular' ? dayRefPrice : nightRefPrice;
           const quoteData = generateQuoteFromMinuteData(filteredData, refPrice);
           setQuote(quoteData);
           
@@ -431,7 +434,6 @@ export default function Home() {
               ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}` 
               : latest.time;
             setLatestTime(`${latest.date} ${formattedTime}`);
-            console.log('📊 最新分析:', latest.analysis);
           } else {
             setLatestAnalysis(null);
             setLatestTime('');
@@ -448,7 +450,6 @@ export default function Home() {
         }
       } finally {
         setIsLoading(false);
-        console.log('✨ 載入完成');
       }
     }
     
@@ -524,16 +525,6 @@ export default function Home() {
 
           const filteredData = mergedData.filter(bar => bar.market_type === resolvedMarketType);
           
-          // 如果市場類型改變，需要重新計算參考價（無論是否手動選擇）
-          let currentRefPrice = referencePrice;
-          const marketTypeChanged = resolvedMarketType !== marketType;
-          
-          if (marketTypeChanged || !referencePrice) {
-            const refPrice = await calculateReferencePrice(resolvedMarketType, mergedData, filteredData);
-            setReferencePrice(refPrice);
-            currentRefPrice = refPrice;
-          }
-          
           if (!isMarketTypeManuallySelected) {
             setMarketType(resolvedMarketType);
           }
@@ -577,6 +568,9 @@ export default function Home() {
             sell_volume: bar.sell_volume
           }));
           setNightChartData(nightChartPoints);
+          
+          // 使用對應的參考價
+          const currentRefPrice = resolvedMarketType === 'regular' ? dayReferencePrice : nightReferencePrice;
           
           // 更新報價資訊（依目前盤面，使用參考價）
           const quoteData = generateQuoteFromMinuteData(filteredData, currentRefPrice ?? 0);
@@ -649,12 +643,11 @@ export default function Home() {
     }));
     setChartData(chartPoints);
     
-    // 重新計算參考價格（因為市場類型變更，基準價也會不同）
-    const refPrice = await calculateReferencePrice(newMarketType, allMinuteData, filteredData);
-    setReferencePrice(refPrice);
+    // 使用對應的參考價格（不重新計算）
+    const refPrice = newMarketType === 'regular' ? dayReferencePrice : nightReferencePrice;
     
     // 更新報價資訊
-    const quoteData = generateQuoteFromMinuteData(filteredData, refPrice);
+    const quoteData = generateQuoteFromMinuteData(filteredData, refPrice!);
     setQuote(quoteData);
     
     // 更新分析結果
@@ -736,7 +729,7 @@ export default function Home() {
                   marketType={marketType}
                   latestAnalysis={latestAnalysis}
                   isLoading={isLoading}
-                  referencePrice={referencePrice}
+                  referencePrice={marketType === 'regular' ? dayReferencePrice : nightReferencePrice}
                 />
               </div>
             </div>
