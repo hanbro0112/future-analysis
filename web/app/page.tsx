@@ -381,7 +381,8 @@ export default function Home() {
             low: bar.low,
             volume: bar.volume,
             buy_volume: bar.buy_volume,
-            sell_volume: bar.sell_volume
+            sell_volume: bar.sell_volume,
+            taiex: bar.analysis?.basis != null ? bar.avg_price - bar.analysis.basis : undefined
           }));
           setDayChartData(dayChartPoints);
 
@@ -554,7 +555,8 @@ export default function Home() {
             low: bar.low,
             volume: bar.volume,
             buy_volume: bar.buy_volume,
-            sell_volume: bar.sell_volume
+            sell_volume: bar.sell_volume,
+            taiex: bar.analysis?.basis != null ? bar.avg_price - bar.analysis.basis : undefined
           }));
           setDayChartData(dayChartPoints);
 
@@ -639,7 +641,8 @@ export default function Home() {
       low: bar.low,
       volume: bar.volume,
       buy_volume: bar.buy_volume,
-      sell_volume: bar.sell_volume
+      sell_volume: bar.sell_volume,
+      taiex: bar.analysis?.basis != null && newMarketType === 'regular' ? bar.avg_price - bar.analysis.basis : undefined
     }));
     setChartData(chartPoints);
     

@@ -51,4 +51,5 @@ export interface MinuteChartPoint {
   volume: number // 成交量
   buy_volume: number // 買方成交量
   sell_volume: number // 賣方成交量
+  taiex?: number // 加權指數（從期現價差計算，僅日盤）
 }

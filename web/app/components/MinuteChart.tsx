@@ -17,49 +17,49 @@ interface MinuteChartProps {
 
 /**
  * 根據成交量比例決定線條顏色
- * 藍色 → 深藍 → 紅色 → 深紅 → 黑色（嚴重爆量）
+ * 灰藍 → 藍 → 紫 → 橙 → 紅 → 深紅（優化配色）
  */
 function getVolumeColor(volumeRatio: number): string {
   // volumeRatio: 當前成交量 / 平均成交量
-  // < 0.8: 淡藍色（量縮）
+  // < 0.8: 淺灰藍（量縮）
   if (volumeRatio < 0.8) {
-    return '#60a5fa'; // 淡藍色
+    return '#94a3b8'; // slate-400
   }
-  // 0.8 - 1.2: 藍色（正常）
+  // 0.8 - 1.2: 灰藍 → 藍色（正常）
   else if (volumeRatio < 1.2) {
     const t = (volumeRatio - 0.8) / 0.4; // 0-1
-    const r = Math.floor(96 - t * 37); // 96 -> 59
-    const g = Math.floor(165 - t * 35); // 165 -> 130
-    const b = Math.floor(250 - t * 4); // 250 -> 246
-    return `rgb(${r}, ${g}, ${b})`; // #60a5fa -> #3b82f6
+    const r = Math.floor(148 - t * 89); // 148 -> 59
+    const g = Math.floor(163 - t * 33); // 163 -> 130
+    const b = Math.floor(184 + t * 62); // 184 -> 246
+    return `rgb(${r}, ${g}, ${b})`; // #94a3b8 -> #3b82f6
   }
-  // 1.2 - 1.8: 深藍色（小放量）
+  // 1.2 - 1.8: 藍色 → 紫藍色（小放量）
   else if (volumeRatio < 1.8) {
     const t = (volumeRatio - 1.2) / 0.6; // 0-1
-    const r = Math.floor(59 - t * 34); // 59 -> 25
-    const g = Math.floor(130 - t * 61); // 130 -> 69
-    const b = Math.floor(246 - t * 113); // 246 -> 133
-    return `rgb(${r}, ${g}, ${b})`; // #3b82f6 -> #194585
+    const r = Math.floor(59 + t * 80); // 59 -> 139
+    const g = Math.floor(130 - t * 38); // 130 -> 92
+    const b = 246; // 保持不變
+    return `rgb(${r}, ${g}, ${b})`; // #3b82f6 -> #8b5cf6
   }
-  // 1.8 - 2.5: 紅色（放量）
+  // 1.8 - 2.5: 紫藍色 → 橙紅色（放量）
   else if (volumeRatio < 2.5) {
     const t = (volumeRatio - 1.8) / 0.7; // 0-1
-    const r = Math.floor(25 + t * 214); // 25 -> 239
-    const g = Math.floor(69 - t * 1); // 69 -> 68
-    const b = Math.floor(133 - t * 65); // 133 -> 68
-    return `rgb(${r}, ${g}, ${b})`; // #194585 -> #ef4444
+    const r = Math.floor(139 + t * 110); // 139 -> 249
+    const g = Math.floor(92 + t * 23); // 92 -> 115
+    const b = Math.floor(246 - t * 224); // 246 -> 22
+    return `rgb(${r}, ${g}, ${b})`; // #8b5cf6 -> #f97316
   }
-  // 2.5 - 3.5: 深紅色（爆量）
+  // 2.5 - 3.5: 橙紅色 → 紅色（爆量）
   else if (volumeRatio < 3.5) {
     const t = (volumeRatio - 2.5) / 1.0; // 0-1
-    const r = Math.floor(239 - t * 19); // 239 -> 220
-    const g = Math.floor(68 - t * 30); // 68 -> 38
-    const b = Math.floor(68 - t * 30); // 68 -> 38
-    return `rgb(${r}, ${g}, ${b})`; // #ef4444 -> #dc2626
+    const r = Math.floor(249 - t * 10); // 249 -> 239
+    const g = Math.floor(115 - t * 47); // 115 -> 68
+    const b = Math.floor(22 + t * 46); // 22 -> 68
+    return `rgb(${r}, ${g}, ${b})`; // #f97316 -> #ef4444
   }
-  // > 3.5: 黑色（嚴重爆量）
+  // > 3.5: 深紅色（嚴重爆量）
   else {
-    return '#1f2937'; // 深灰黑色
+    return '#991b1b'; // red-800
   }
 }
 
@@ -85,6 +85,11 @@ const CustomTooltip = ({ active, payload }: any) => {
           <p className="text-gray-700">
             平均價: <span className="font-semibold text-blue-600">{data.avg_price.toFixed(0)}</span>
           </p>
+          {data.taiex != null && (
+            <p className="text-gray-700">
+              加權指數: <span className="font-semibold text-yellow-600">{data.taiex.toFixed(2)}</span>
+            </p>
+          )}
           <p className="text-gray-700">
             最高價: <span className="font-semibold text-red-600">{data.high.toFixed(0)}</span>
           </p>
@@ -116,13 +121,10 @@ const CustomTooltip = ({ active, payload }: any) => {
  * - 成交量柱狀圖背景
  */
 export default function MinuteChart({ data, dayData, nightData, title = '分鐘級走勢', marketType = 'regular', latestAnalysis = null, isLoading = false, referencePrice }: MinuteChartProps) {
-  // 控制是否顯示高低價線（日盤預設開啟，夜盤預設關閉）
-  const [showHighLow, setShowHighLow] = useState(marketType === 'regular');
-  
-  // 當 marketType 改變時，更新 showHighLow 狀態
-  useEffect(() => {
-    setShowHighLow(marketType === 'regular');
-  }, [marketType]);
+  // 控制是否顯示高低價線（預設關閉）
+  const [showHighLow, setShowHighLow] = useState(false);
+  // 控制是否顯示加權指數線（預設開啟）
+  const [showTaiex, setShowTaiex] = useState(true);
   
   // 判斷是否使用預先計算模式（有提供日盤和夜盤數據）
   const usePrecomputedMode = dayData !== undefined && nightData !== undefined;
@@ -221,6 +223,23 @@ export default function MinuteChart({ data, dayData, nightData, title = '分鐘�
 
   // 計算價格範圍（用於設定 Y 軸）
   const hasData = normalizedData && normalizedData.length > 0;
+  
+  // 檢查是否有加權指數資料（僅日盤）
+  const hasTaiex = hasData && normalizedData.some(d => d.taiex != null);
+
+  // 計算 Legend payload
+  const legendPayload = useMemo((): any => {
+    return hasTaiex 
+      ? [
+          { value: '成交量', type: 'rect', color: '#3b82f6' },
+          { value: '加權指數', type: 'line', color: '#eab308' },
+          { value: '區間高低價', type: 'line', color: '#374151' }
+        ]
+      : [
+          { value: '成交量', type: 'rect', color: '#3b82f6' },
+          { value: '區間高低價', type: 'line', color: '#374151' }
+        ];
+  }, [hasTaiex]);
 
   // 計算平均成交量（用於顏色計算）- 為兩個市場類型分別計算
   const dayAvgVolume = useMemo(() => {
@@ -250,8 +269,14 @@ export default function MinuteChart({ data, dayData, nightData, title = '分鐘�
       if (dataPoint) {
         const volumeRatio = dataPoint.volume / avgVol;
         const color = getVolumeColor(volumeRatio);
+        
+        // 盤前時段 (08:45-08:59) 不顯示加權指數
+        const [hour] = time.split(':').map(Number);
+        const shouldHideTaiex = hour === 8;
+        
         return {
           ...dataPoint,
+          taiex: shouldHideTaiex ? undefined : dataPoint.taiex,
           color
         };
       }
@@ -685,6 +710,17 @@ export default function MinuteChart({ data, dayData, nightData, title = '分鐘�
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-base font-semibold text-gray-800">{title}</h3>
         <div className="flex items-center gap-3">
+          {!isLoading && hasTaiex && (
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer hover:text-gray-800 transition-colors">
+              <input
+                type="checkbox"
+                checked={showTaiex}
+                onChange={(e) => setShowTaiex(e.target.checked)}
+                className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+              />
+              <span>加權指數</span>
+            </label>
+          )}
           {!isLoading && (
             <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer hover:text-gray-800 transition-colors">
               <input
@@ -693,7 +729,7 @@ export default function MinuteChart({ data, dayData, nightData, title = '分鐘�
                 onChange={(e) => setShowHighLow(e.target.checked)}
                 className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
               />
-              <span>顯示區間高低價</span>
+              <span>區間高低價</span>
             </label>
           )}
           {isLoading && (
@@ -780,10 +816,7 @@ export default function MinuteChart({ data, dayData, nightData, title = '分鐘�
             wrapperStyle={{ fontSize: '11px', color: '#374151' }}
             iconType="line"
             iconSize={10}
-            payload={[
-              { value: '成交量', type: 'rect', color: '#3b82f6' },
-              { value: '區間高低價', type: 'line', color: '#374151' }
-            ]}
+            payload={legendPayload}
           />
           
           {/* 成交量柱狀圖（背景，淡藍色） */}
@@ -844,6 +877,22 @@ export default function MinuteChart({ data, dayData, nightData, title = '分鐘�
               isAnimationActive={false}
             />
           ))}
+          
+          {/* 加權指數線（淺黃色細線，僅日盤有資料時顯示，盤前不顯示） */}
+          {hasTaiex && showTaiex && (
+            <Line 
+              yAxisId="price"
+              type="monotone" 
+              dataKey="taiex"
+              stroke="#fde68a"
+              strokeWidth={1.5}
+              dot={false}
+              activeDot={{ r: 4 }}
+              name="加權指數"
+              connectNulls={false}
+              isAnimationActive={false}
+            />
+          )}
           
           {/* 標記最高價位置 */}
           {highestPoint && referencePrice && (
