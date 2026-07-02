@@ -200,6 +200,7 @@ class PubSubSubscriber:
         self.subscription_path = self.subscriber.subscription_path(
             project_id, subscription_id
         )
+        self._streaming_pull_future = None  # 保存 future 引用以便取消
         
         if is_emulator_mode():
             print(f"🔧 使用 Pub/Sub Emulator: {os.getenv('PUBSUB_EMULATOR_HOST')}")
@@ -228,14 +229,14 @@ class PubSubSubscriber:
                 # 解析訊息資料
                 data = json.loads(message.data.decode('utf-8'))
                 
-                print(f"📨 收到訊息 ID: {message.message_id}")
+                # print(f"📨 收到訊息 ID: {message.message_id}")
                 
                 # 呼叫使用者提供的回調函數
                 callback(data)
                 
                 # 確認訊息已處理
                 message.ack()
-                print(f"✅ 訊息已確認: {message.message_id}")
+                # print(f"✅ 訊息已確認: {message.message_id}")
                 
             except json.JSONDecodeError as e:
                 print(f"❌ JSON 解析錯誤: {e}")
@@ -261,6 +262,9 @@ class PubSubSubscriber:
                     callback=message_callback,
                     flow_control=flow_control
                 )
+                
+                # 保存引用以便外部取消
+                self._streaming_pull_future = streaming_pull_future
                 
                 # 重置重試計數器（成功連線）
                 retry_count = 0
@@ -327,5 +331,17 @@ class PubSubSubscriber:
     
     def close(self) -> None:
         """關閉訂閱者連線"""
-        self.subscriber.close()
-        print("🔌 訂閱者連線已關閉")
+        # 先取消訂閱 future（如果存在）
+        if self._streaming_pull_future:
+            try:
+                self._streaming_pull_future.cancel()
+                print("🛑 已取消訂閱串流")
+            except Exception as e:
+                print(f"⚠️  取消訂閱串流時發生錯誤: {e}")
+        
+        # 關閉訂閱者客戶端
+        try:
+            self.subscriber.close()
+            print("🔌 訂閱者連線已關閉")
+        except Exception as e:
+            print(f"⚠️  關閉訂閱者時發生錯誤: {e}")

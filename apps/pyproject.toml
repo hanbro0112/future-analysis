@@ -2,8 +2,10 @@
 members = [
     "price-analyzer",
     "price-listener",
+    "price-broadcaster",
     "libs/pubsub",
     "libs/firestore-writer",
+    "price-broadcaster",
 ]
 
 [tool.uv.sources]

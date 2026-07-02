@@ -9,8 +9,9 @@ dev:
     cd apps && uv sync && uv run main
 
 tmp:
-    cd apps && uv sync --package price-listener && uv run --package price-listener python -m price-listener.main
     cd apps && uv sync --package price-analyzer && uv run --package price-analyzer python -m price-analyzer.main
+    cd apps && uv sync --package price-broadcaster && uv run --package price-broadcaster python -m price-broadcaster.main
+    cd apps && uv sync --package price-listener && uv run --package price-listener python -m price-listener.main
 
 init:
     node --version
