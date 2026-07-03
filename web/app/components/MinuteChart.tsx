@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceDot } from 'recharts'
 import type { MinuteChartPoint, AnalysisResult } from '../types/minuteData'
 
@@ -120,7 +120,7 @@ const CustomTooltip = ({ active, payload }: any) => {
  * - 高低價格淡色線
  * - 成交量柱狀圖背景
  */
-export default function MinuteChart({ data, dayData, nightData, title = '分鐘級走勢', marketType = 'regular', latestAnalysis = null, isLoading = false, referencePrice }: MinuteChartProps) {
+const MinuteChart = ({ data, dayData, nightData, title = '分鐘級走勢', marketType = 'regular', latestAnalysis = null, isLoading = false, referencePrice }: MinuteChartProps) => {
   // 控制是否顯示高低價線（預設關閉）
   const [showHighLow, setShowHighLow] = useState(false);
   // 控制是否顯示加權指數線（預設開啟）
@@ -940,3 +940,5 @@ export default function MinuteChart({ data, dayData, nightData, title = '分鐘�
     </div>
   )
 }
+
+export default memo(MinuteChart);

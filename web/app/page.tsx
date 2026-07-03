@@ -5,9 +5,11 @@
  * 顯示台指期分鐘級走勢圖與報價資訊
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import QuoteCard from './components/QuoteCard';
 import MinuteChart from './components/MinuteChart';
+import { useWebSocket } from './lib/useWebSocket';
+import { isInTradingHours } from './lib/tradingHours';
 
 import { 
   getTodayMinuteData, 
@@ -109,44 +111,7 @@ const getDaySessionDate = (): Date => {
  * 判斷當前是否在交易時段內（包含延後 3 分鐘以更新最後一筆資料）
  * @returns 是否在交易時段（日盤或夜盤）
  */
-const isInTradingHours = (): boolean => {
-  const now = new Date();
-  const day = now.getDay(); // 0 = 週日, 1 = 週一, ..., 6 = 週六
-  const hours = now.getHours();
-  const minutes = now.getMinutes();
-  const totalMinutes = hours * 60 + minutes;
 
-  // 週六全天不交易
-  if (day === 6) {
-    return false;
-  }
-
-  // 週日：只有夜盤（15:00 開始）
-  if (day === 0) {
-    return totalMinutes >= 15 * 60; // 15:00 之後
-  }
-
-  // 週一至週五
-  // 日盤時段：08:45-13:48 (525-828 分鐘) - 延後 3 分鐘以更新最後一筆
-  const daySessionStart = 8 * 60 + 45; // 525
-  const daySessionEnd = 13 * 60 + 48; // 828 (原本 13:45 + 3 分鐘)
-
-  // 夜盤時段：15:00-次日05:03 - 延後 3 分鐘以更新最後一筆
-  const nightSessionStart = 15 * 60; // 900
-  const nightSessionEnd = 5 * 60 + 3; // 303 (原本 05:00 + 3 分鐘)
-
-  // 判斷是否在交易時段
-  if (totalMinutes >= daySessionStart && totalMinutes <= daySessionEnd) {
-    // 日盤時段
-    return true;
-  } else if (totalMinutes >= nightSessionStart || totalMinutes < nightSessionEnd) {
-    // 夜盤時段（15:00 之後或 05:03 之前）
-    return true;
-  }
-
-  // 其他時間不在交易時段
-  return false;
-};
 
 /**
  * 獲取夜盤的交易日期
@@ -211,6 +176,21 @@ export default function Home() {
   const [isMarketTypeManuallySelected, setIsMarketTypeManuallySelected] = useState(false);
   const [dayReferencePrice, setDayReferencePrice] = useState<number | null>(null); // 日盤漲跌幅參考價
   const [nightReferencePrice, setNightReferencePrice] = useState<number | null>(null); // 夜盤漲跌幅參考價
+
+  // WebSocket 即時報價連接
+  const { prices: realtimePrices, isConnected: wsConnected } = useWebSocket(
+    'ws://localhost:8001/ws/price'
+  );
+
+  // 使用 useMemo 提取即時報價，避免不必要的重新渲染
+  const realtimePrice = useMemo(() => {
+    return Object.values(realtimePrices)[0] || null;
+  }, [realtimePrices]);
+
+  // 使用 useMemo 計算當前參考價格
+  const currentReferencePrice = useMemo(() => {
+    return marketType === 'regular' ? dayReferencePrice : nightReferencePrice;
+  }, [marketType, dayReferencePrice, nightReferencePrice]);
 
   const resolveMarketType = (
     data: MinuteBar[],
@@ -493,8 +473,9 @@ export default function Home() {
       isUpdatingRef.current = true;
       
       // 檢查是否在交易時段內
-      if (!isInTradingHours()) {
-        console.log('⏸️ 非交易時段，跳過更新');
+      // 條件：如果 websocket 連線正常且沒有手動選擇盤別且不在交易時段，則跳過（有即時資料不需要更新歷史）
+      // 否則：無論是斷線降級或手動選擇，都應該更新
+      if (wsConnected && !isMarketTypeManuallySelected && !isInTradingHours()) {
         isUpdatingRef.current = false;
         return;
       }
@@ -624,6 +605,53 @@ export default function Home() {
     };
   }, [minuteData.length]);
 
+  // 監聽 WebSocket 重連，自動切回當前時段
+  useEffect(() => {
+    // 只在 WebSocket 連線且用戶未手動選擇盤別時，自動切回當前時段
+    if (wsConnected && !isMarketTypeManuallySelected) {
+      const currentSessionType = getDefaultMarketType();
+      
+      if (marketType !== currentSessionType) {
+        setMarketType(currentSessionType);
+        
+        // 更新顯示資料
+        const filteredData = allMinuteData.filter(bar => bar.market_type === currentSessionType);
+        if (filteredData.length > 0) {
+          setMinuteData(filteredData);
+          
+          // 更新圖表資料
+          const chartPoints: MinuteChartPoint[] = filteredData.map(bar => ({
+            time: bar.time,
+            avg_price: bar.avg_price,
+            high: bar.high,
+            low: bar.low,
+            volume: bar.volume,
+            buy_volume: bar.buy_volume,
+            sell_volume: bar.sell_volume,
+            taiex: bar.analysis?.basis != null && currentSessionType === 'regular' ? bar.avg_price - bar.analysis.basis : undefined
+          }));
+          setChartData(chartPoints);
+          
+          // 更新報價和分析
+          const refPrice = currentSessionType === 'regular' ? dayReferencePrice : nightReferencePrice;
+          if (refPrice) {
+            const quoteData = generateQuoteFromMinuteData(filteredData, refPrice);
+            setQuote(quoteData);
+          }
+          
+          const latest = filteredData[filteredData.length - 1];
+          if (latest?.analysis) {
+            setLatestAnalysis(latest.analysis);
+            const formattedTime = latest.time.length === 4 
+              ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}` 
+              : latest.time;
+            setLatestTime(`${latest.date} ${formattedTime}`);
+          }
+        }
+      }
+    }
+  }, [wsConnected, isMarketTypeManuallySelected]);
+
   // 切換市場類型（日盤/夜盤）
   const handleMarketTypeChange = async (newMarketType: 'regular' | 'after_hours') => {
     setIsMarketTypeManuallySelected(true);
@@ -719,7 +747,14 @@ export default function Home() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* 左側：報價卡片 */}
               <div className="lg:col-span-1">
-                <QuoteCard quote={quote} analysis={latestAnalysis} />
+                <QuoteCard 
+                  quote={quote} 
+                  realtimePrice={marketType === getDefaultMarketType() && wsConnected ? realtimePrice : null}
+                  referencePrice={currentReferencePrice}
+                  analysis={latestAnalysis}
+                  isConnected={wsConnected}
+                  isCurrentSession={marketType === getDefaultMarketType()}
+                />
               </div>
 
               {/* 右側：分鐘級走勢圖 */}
@@ -732,7 +767,7 @@ export default function Home() {
                   marketType={marketType}
                   latestAnalysis={latestAnalysis}
                   isLoading={isLoading}
-                  referencePrice={marketType === 'regular' ? dayReferencePrice : nightReferencePrice}
+                  referencePrice={currentReferencePrice}
                 />
               </div>
             </div>
