@@ -5,12 +5,14 @@ FastAPI WebSocket 即時報價伺服器，提供每秒一次的報價廣播，�
 ## 功能
 
 1. **即時報價廣播**：透過 WebSocket 每秒發送最新報價
-2. **Pub/Sub 訂閱**：從 Firestore Pub/Sub 接收 tick 資料
-3. **價格聚合**：同一秒內多筆成交取最新價格
-4. **自動填充**：缺失的秒數自動使用前一秒價格填充，確保每分鐘完整 60 筆
-5. **跨分鐘連續**：第 0 秒缺失時使用上一分鐘最後價格
-6. **夜盤跨日處理**：夜盤 00:00-05:59 的資料儲存到前一天
-7. **歷史儲存**：每分鐘將 60 筆報價儲存到 Firestore
+2. **完整報價資訊**：包含成交價、加權指數、每秒總成交量
+3. **Pub/Sub 訂閱**：從 Firestore Pub/Sub 接收 tick 資料
+4. **價格聚合**：同一秒內多筆成交取最新價格
+5. **成交量累計**：自動累計每秒所有 tick 的成交量
+6. **自動填充**：缺失的秒數自動使用前一秒價格填充，確保每分鐘完整 60 筆
+7. **跨分鐘連續**：第 0 秒缺失時使用上一分鐘最後價格
+8. **夜盤跨日處理**：夜盤 00:00-05:59 的資料儲存到前一天
+9. **歷史儲存**：每分鐘將 60 筆報價儲存到 Firestore
 
 ## 資料格式
 
@@ -19,46 +21,80 @@ FastAPI WebSocket 即時報價伺服器，提供每秒一次的報價廣播，�
 {
   "type": "price",
   "data": {
-    "MXFF6": 23450.0
+    "MXFF6": {
+      "price": 23450.0,
+      "underlying_price": 23644.4,
+      "volume": 125
+    }
   },
   "timestamp": "2026-07-03T09:00:01.123456"
 }
 ```
 
+欄位說明：
+- `price`: 最新成交價
+- `underlying_price`: 加權指數（現貨標的指數當前價格）
+- `volume`: 該秒總成交量（累計該秒內所有 tick 的成交量）
+
 ### Firestore 儲存
 - **路徑**：`market/{商品代碼}/{YYYYMMDD_tick}/{HHMM}`
-- **格式**：`{秒數: 價格}`（固定 60 筆，00-59）
+- **格式**：`{秒數: {price, underlying_price, volume}}`（固定 60 筆，00-59）
+- **填充規則**：缺失的秒數只填充 `price` 欄位
 
 範例：
 ```
 market/MXF/20260703_tick/0900
 {
-  "00": 23450.0,
-  "01": 23451.0,
-  "02": 23451.0,
+  "00": {
+    "price": 23450.0,
+    "underlying_price": 23644.4,
+    "volume": 125
+  },
+  "01": {
+    "price": 23451.0,
+    "underlying_price": 23645.1,
+    "volume": 89
+  },
+  "02": {
+    "price": 23451.0  // 缺失資料，只填充 price
+  },
   ...
-  "59": 23455.0,
+  "59": {
+    "price": 23455.0,
+    "underlying_price": 23648.2,
+    "volume": 156
+  },
   "created_at": <timestamp>,
   "updated_at": <timestamp>
 }
 ```
 
+每個秒數包含：
+- `price`: 該秒的成交價（**必有**，缺失時自動填充）
+- `underlying_price`: 該秒的加權指數（有實際資料時才有）
+- `volume`: 該秒的總成交量（有實際資料時才有）
+
 ## 自動填充機制
 
 ### 前向填充 (Forward Fill)
-缺失的秒數會自動使用最近一次的價格填充：
+缺失的秒數會自動使用最近一次的價格填充（**僅填充 price**，不包含 underlying_price 和 volume）：
 
 ```
-實際資料: 0-45 秒有資料，46 秒缺失，47-59 秒有資料
-填充結果: 46 秒使用 45 秒的價格
+實際資料: 
+  45 秒 = {price: 23450, underlying_price: 23644.4, volume: 125}
+  46 秒缺失
+  47 秒 = {price: 23452, underlying_price: 23645.2, volume: 98}
+
+填充結果: 
+  46 秒 = {price: 23450}  // 只填充 price
 ```
 
 ### 跨分鐘填充
 如果某分鐘的第 0 秒缺失，會使用上一分鐘的最後價格（59 秒）：
 
 ```
-上一分鐘 03:21:59 = 23450
-本分鐘 03:22:00 缺失 → 自動填充為 23450
+上一分鐘 03:21:59 = {price: 23450, underlying_price: 23644.4, volume: 125}
+本分鐘 03:22:00 缺失 → 填充為 {price: 23450}
 ```
 
 ## 執行
@@ -93,7 +129,10 @@ ws.onopen = () => {
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
   console.log('收到報價:', data);
-  // data.data 包含 {商品代碼: 價格} 的對應
+  // data.data 包含 {商品代碼: {price, underlying_price, volume}} 的對應
+  // 例如: data.data.MXFF6.price = 23450.0
+  // 例如: data.data.MXFF6.underlying_price = 23644.4
+  // 例如: data.data.MXFF6.volume = 125
 };
 
 ws.onerror = (error) => {
@@ -160,6 +199,8 @@ price-broadcaster/
 ## 特性
 
 - ✅ 每秒廣播最新報價給所有 WebSocket 客戶端
+- ✅ 提供成交價、加權指數、每秒總成交量資訊
+- ✅ 自動累計每秒所有 tick 的成交量
 - ✅ 同一秒內多筆成交取最新價格
 - ✅ WebSocket 連接管理（自動清理斷開連接）
 - ✅ 每分鐘自動儲存完整 60 筆報價
@@ -172,7 +213,11 @@ price-broadcaster/
 
 ## 注意事項
 
-1. **報價連續性**：服務會確保每分鐘都有完整的 60 筆報價（透過填充機制）
-2. **資料來源**：必須先啟動 `price-listener` 服務發送 tick 資料到 Pub/Sub
-3. **Firestore Emulator**：開發環境使用 Emulator，需設定 `FIRESTORE_EMULATOR_HOST`
-4. **WebSocket 心跳**：客戶端應定期發送訊息以維持連接
+1. **報價資訊**：每筆報價包含成交價、加權指數、每秒總成交量
+2. **成交量計算**：每秒自動累計所有 tick 的 volume，下一秒重置
+3. **儲存格式**：Firestore 中每個秒數儲存完整的報價物件（有實際資料時）
+4. **填充機制**：缺失秒數**只填充 price 欄位**，不包含 underlying_price 和 volume
+5. **報價連續性**：服務會確保每分鐘都有完整的 60 筆報價（透過填充機制）
+6. **資料來源**：必須先啟動 `price-listener` 服務發送 tick 資料到 Pub/Sub
+7. **Firestore Emulator**：開發環境使用 Emulator，需設定 `FIRESTORE_EMULATOR_HOST`
+8. **WebSocket 心跳**：客戶端應定期發送訊息以維持連接

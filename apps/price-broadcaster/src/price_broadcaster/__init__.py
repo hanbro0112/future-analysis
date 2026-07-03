@@ -23,10 +23,13 @@ from firestore_writer import FirestoreWriter
 
 class TickData:
     """Tick 資料"""
-    def __init__(self, code: str, datetime: datetime, close: Decimal):
+    def __init__(self, code: str, datetime: datetime, close: Decimal, 
+                 underlying_price: Optional[Decimal] = None, volume: int = 0):
         self.code = code
         self.datetime = datetime
         self.close = close
+        self.underlying_price = underlying_price
+        self.volume = volume
 
 
 class PriceBroadcaster:
@@ -48,14 +51,19 @@ class PriceBroadcaster:
         self.active_connections: Set[WebSocket] = set()
         
         # 最新報價快取（每秒更新）
-        self.latest_prices: Dict[str, Decimal] = {}
+        # 格式: {code: {"price": float, "underlying_price": float, "volume": int}}
+        self.latest_prices: Dict[str, dict] = {}
         
         # 每秒報價儲存（用於每分鐘寫入 Firestore）
-        # key: (code, minute_timestamp), value: {second: price}
-        self.minute_prices: Dict[tuple, Dict[int, float]] = defaultdict(dict)
+        # key: (code, minute_timestamp), value: {second: {price, underlying_price, volume}}
+        self.minute_prices: Dict[tuple, Dict[int, dict]] = defaultdict(dict)
         
         # 保存每個商品最後一分鐘的最後價格（用於填充下一分鐘的第 0 秒）
         self.last_minute_prices: Dict[str, float] = {}
+        
+        # 每秒總成交量累計（每秒重置）
+        # 格式: {code: volume}
+        self.second_volumes: Dict[str, int] = defaultdict(int)
         
         # 初始化 Firestore Writer
         self.firestore_writer = FirestoreWriter(
@@ -85,7 +93,7 @@ class PriceBroadcaster:
             return {
                 "status": "healthy",
                 "connections": len(self.active_connections),
-                "latest_prices": {k: float(v) for k, v in self.latest_prices.items()}
+                "latest_prices": self.latest_prices
             }
         
         @self.app.websocket("/ws/price")
@@ -104,7 +112,7 @@ class PriceBroadcaster:
             if self.latest_prices:
                 await websocket.send_json({
                     "type": "price",
-                    "data": {k: float(v) for k, v in self.latest_prices.items()},
+                    "data": self.latest_prices,
                     "timestamp": datetime.now().isoformat()
                 })
             
@@ -133,9 +141,17 @@ class PriceBroadcaster:
                     current_second = now.second
                     minute_timestamp = now.replace(second=0, microsecond=0)
                     
-                    for code, price in self.latest_prices.items():
+                    for code, price_info in self.latest_prices.items():
                         key = (code, minute_timestamp)
-                        self.minute_prices[key][current_second] = float(price)
+                        # 儲存完整的報價資訊
+                        self.minute_prices[key][current_second] = {
+                            "price": price_info["price"],
+                            "underlying_price": price_info["underlying_price"],
+                            "volume": price_info["volume"]
+                        }
+                    
+                    # 重置每秒成交量累計
+                    self.second_volumes.clear()
                 
                 # 如果有連接才廣播
                 if not self.active_connections or not self.latest_prices:
@@ -144,7 +160,7 @@ class PriceBroadcaster:
                 # 準備報價訊息
                 message = {
                     "type": "price",
-                    "data": {k: float(v) for k, v in self.latest_prices.items()},
+                    "data": self.latest_prices,
                     "timestamp": datetime.now().isoformat()
                 }
                 
@@ -200,14 +216,14 @@ class PriceBroadcaster:
                         collection_path = f"market/{clean_code}/{date_str}_tick"
                         doc_id = time_str
                         
-                        # 準備儲存的資料（格式：{秒數: 價格}）- 只儲存 0-59 秒
+                        # 準備儲存的資料（格式：{秒數: {price, underlying_price, volume}}）- 只儲存 0-59 秒
                         filtered_prices = {
-                            second: price 
-                            for second, price in prices.items()
+                            second: price_info 
+                            for second, price_info in prices.items()
                             if 0 <= second <= 59
                         }
                         
-                        # 前向填充缺失的秒數（使用最近一次的價格）
+                        # 前向填充缺失的秒數（只填充 price）
                         save_data = {}
                         last_price = None
                         
@@ -217,12 +233,13 @@ class PriceBroadcaster:
                         
                         for second in range(60):
                             if second in filtered_prices:
-                                # 有資料，使用實際價格
-                                last_price = filtered_prices[second]
-                                save_data[str(second).zfill(2)] = last_price
+                                # 有資料，使用實際報價（完整資訊）
+                                price_info = filtered_prices[second]
+                                last_price = price_info["price"]
+                                save_data[str(second).zfill(2)] = price_info
                             elif last_price is not None:
-                                # 缺失資料，使用前一秒的價格填充
-                                save_data[str(second).zfill(2)] = last_price
+                                # 缺失資料，只填充 price
+                                save_data[str(second).zfill(2)] = {"price": last_price}
                             # 如果 last_price 還是 None，則跳過該秒
                         
                         # 保存這一分鐘的最後價格供下一分鐘使用
@@ -297,10 +314,19 @@ class PriceBroadcaster:
                 return
             
             code = data['code']
-            close_price = Decimal(str(data['close']))
+            close_price = float(data['close'])
+            underlying_price = float(data.get('underlying_price', 0))
+            volume = int(data.get('volume', 0))
             
-            # 更新最新報價（同一秒內多筆取最新）
-            self.latest_prices[code] = close_price
+            # 累計每秒的總成交量
+            self.second_volumes[code] += volume
+            
+            # 更新最新報價（同一秒內多筆取最新價格，但累計成交量）
+            self.latest_prices[code] = {
+                "price": close_price,
+                "underlying_price": underlying_price,
+                "volume": self.second_volumes[code]
+            }
             
         except Exception as e:
             print(f"⚠️  處理 tick 錯誤: {e}")

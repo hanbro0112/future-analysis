@@ -15,21 +15,33 @@ async def test_websocket():
     
     try:
         async with websockets.connect(uri) as websocket:
-            print("✅ WebSocket 連接成功")
+            print("✅ WebSocket 連接成功\n")
             
             # 接收訊息
             for i in range(10):  # 接收 10 次報價
                 message = await websocket.recv()
                 data = json.loads(message)
                 
-                print(f"\n📊 收到報價 #{i+1}:")
+                print(f"📊 收到報價 #{i+1}:")
                 print(f"   時間: {data['timestamp']}")
-                print(f"   報價: {data['data']}")
+                
+                # 顯示每個商品的詳細報價資訊
+                if data.get('data'):
+                    for code, price_info in data['data'].items():
+                        if isinstance(price_info, dict):
+                            print(f"   {code}:")
+                            print(f"      成交價: {price_info.get('price', 'N/A')}")
+                            print(f"      加權指數: {price_info.get('underlying_price', 'N/A')}")
+                            print(f"      每秒成交量: {price_info.get('volume', 'N/A')}")
+                        else:
+                            # 相容舊格式（單純的價格）
+                            print(f"   {code}: {price_info}")
+                print()
                 
                 # 發送心跳
                 await websocket.send("ping")
             
-            print("\n✨ 測試完成")
+            print("✨ 測試完成")
     
     except Exception as e:
         print(f"❌ 錯誤: {e}")
