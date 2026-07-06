@@ -7,6 +7,27 @@ import { db } from './firebase';
 import type { MinuteBar } from '../types/minuteData';
 
 /**
+ * 獲取最近的交易日（排除週末）
+ * @param date 基準日期
+ * @returns 最近的交易日
+ */
+function getLastTradingDay(date: Date): Date {
+  const result = new Date(date);
+  const day = result.getDay();
+  
+  // 如果是週六，往前推到週五
+  if (day === 6) {
+    result.setDate(result.getDate() - 1);
+  }
+  // 如果是週日，往前推到週五
+  else if (day === 0) {
+    result.setDate(result.getDate() - 2);
+  }
+  
+  return result;
+}
+
+/**
  * 取得指定日期的所有分鐘資料
  * @param symbol 商品代碼 (例如: MXF)
  * @param date 日期 (格式: YYYYMMDD)
@@ -108,6 +129,9 @@ export async function getTodayDaySession(symbol: string): Promise<MinuteBar[]> {
     dateForQuery.setDate(dateForQuery.getDate() - 1);
   }
   
+  // 確保日期是交易日（排除週末）
+  dateForQuery = getLastTradingDay(dateForQuery);
+  
   const dateStr = formatDateToYYYYMMDD(dateForQuery);
   return getMinuteData(symbol, dateStr, 'regular');
 }
@@ -132,6 +156,9 @@ export async function getTodayNightSession(symbol: string): Promise<MinuteBar[]>
     dateForQuery = new Date(now);
     dateForQuery.setDate(dateForQuery.getDate() - 1);
   }
+  
+  // 確保日期是交易日（排除週末）
+  dateForQuery = getLastTradingDay(dateForQuery);
   
   const dateStr = formatDateToYYYYMMDD(dateForQuery);
   return getMinuteData(symbol, dateStr, 'after_hours');

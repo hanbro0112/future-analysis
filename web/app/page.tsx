@@ -771,6 +771,9 @@ export default function Home() {
                 />
               </div>
             </div>
+
+            {/* 分隔線 */}
+            <div className="my-8 border-t border-gray-200"></div>
           </>
         )}
       </main>

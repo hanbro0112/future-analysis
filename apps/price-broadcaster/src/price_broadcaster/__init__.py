@@ -200,6 +200,12 @@ class PriceBroadcaster:
                 keys_to_remove = []
                 for (code, minute_timestamp), prices in self.minute_prices.items():
                     if minute_timestamp == prev_minute and prices:
+                        # 檢查是否在交易時段，只有交易時段才寫入
+                        if not self._is_in_trading_hours(minute_timestamp):
+                            print(f"⏸️  非交易時段，跳過儲存: {minute_timestamp.strftime('%Y-%m-%d %H:%M')}")
+                            keys_to_remove.append((code, minute_timestamp))
+                            continue
+                        
                         # 取得商品代碼（移除合約月份）
                         clean_code = code[:3] if len(code) >= 3 else code
                         
@@ -305,6 +311,52 @@ class PriceBroadcaster:
         else:
             # 盤前或休市時段，預設為 regular
             return 'regular'
+    
+    def _is_in_trading_hours(self, dt: datetime) -> bool:
+        """
+        判斷指定時間是否在交易時段內
+        
+        台指期交易時間：
+        - 日盤：週一至週五 08:45 - 13:45
+        - 夜盤：週一至週五 15:00 - 次日 05:00
+        - 週六：00:00-05:00（週五夜盤延續）
+        - 週日：15:00 開始（週日夜盤）
+        
+        Args:
+            dt: 時間
+            
+        Returns:
+            是否在交易時段
+        """
+        day = dt.weekday()  # 0 = 週一, 6 = 週日
+        hour = dt.hour
+        minute = dt.minute
+        time_in_minutes = hour * 60 + minute
+        
+        # 時段定義（與前端保持一致）
+        day_session_start = 8 * 60 + 45  # 08:45 (525 分鐘)
+        day_session_end = 13 * 60 + 45   # 13:45 (825 分鐘)
+        night_session_start = 15 * 60    # 15:00 (900 分鐘)
+        night_session_end = 5 * 60       # 05:00 (300 分鐘)
+        
+        # 週六：只有 00:00-05:00 算是週五夜盤的延續
+        if day == 5:  # 週六
+            return time_in_minutes < night_session_end
+        
+        # 週日：只有夜盤（15:00 開始）
+        if day == 6:  # 週日
+            return time_in_minutes >= night_session_start
+        
+        # 週一至週五
+        # 日盤時段
+        if day_session_start <= time_in_minutes <= day_session_end:
+            return True
+        # 夜盤時段（15:00 之後或 05:00 之前）
+        elif time_in_minutes >= night_session_start or time_in_minutes < night_session_end:
+            return True
+        
+        # 其他時間不在交易時段
+        return False
     
     def process_tick(self, data: dict):
         """處理接收到的 tick 資料"""
