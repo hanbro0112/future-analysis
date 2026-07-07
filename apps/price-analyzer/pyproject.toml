@@ -8,6 +8,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "pubsub",
     "firestore-writer",
+    "google-genai>=0.1.0",
 ]
 
 [tool.uv.scripts]

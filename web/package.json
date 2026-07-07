@@ -15,7 +15,8 @@
     "react-dom": "^19.0.0",
     "next": "^15.1.4",
     "recharts": "^2.15.1",
-    "firebase": "^11.2.0"
+    "firebase": "^11.2.0",
+    "marked": "^12.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

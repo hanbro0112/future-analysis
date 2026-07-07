@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import QuoteCard from './components/QuoteCard';
 import MinuteChart from './components/MinuteChart';
+import DailyAnalysisCard from './components/DailyAnalysisCard';
 import { useWebSocket } from './lib/useWebSocket';
 import { isInTradingHours } from './lib/tradingHours';
 
@@ -16,7 +17,10 @@ import {
   getTodayDaySession, 
   getTodayNightSession, 
   getMinuteData, 
-  formatDateToYYYYMMDD 
+  formatDateToYYYYMMDD,
+  getLastTradingDay,
+  getTodayDailyReport,
+  type DailyReport
 } from './lib/firestoreApi';
 import type { TaifexQuote } from './types/futures';
 import type { MinuteBar, MinuteChartPoint, AnalysisResult } from './types/minuteData';
@@ -176,6 +180,8 @@ export default function Home() {
   const [isMarketTypeManuallySelected, setIsMarketTypeManuallySelected] = useState(false);
   const [dayReferencePrice, setDayReferencePrice] = useState<number | null>(null); // 日盤漲跌幅參考價
   const [nightReferencePrice, setNightReferencePrice] = useState<number | null>(null); // 夜盤漲跌幅參考價
+  const [dailyReport, setDailyReport] = useState<DailyReport | null>(null); // 每日分析報告
+  const [isDailyReportLoading, setIsDailyReportLoading] = useState(true); // 每日分析載入狀態
 
   // WebSocket 即時報價連接
   const { prices: realtimePrices, isConnected: wsConnected } = useWebSocket(
@@ -223,18 +229,23 @@ export default function Home() {
           return refPrice;
         }
       } else {
-        // 日盤：使用前一天日盤收盤價
+        // 日盤：使用前一天日盤收盤價（考慮假日）
         // 取當前查看的日盤資料日期，而非系統當前時間
         if (currentData.length > 0) {
           const currentDate = new Date(currentData[0].date);
           const yesterday = new Date(currentDate);
           yesterday.setDate(yesterday.getDate() - 1);
           
-          const dateStr = formatDateToYYYYMMDD(yesterday);
+          // 找到最近的交易日（排除週末）
+          const lastTradingDay = getLastTradingDay(yesterday);
+          const dateStr = formatDateToYYYYMMDD(lastTradingDay);
+          
+          console.log('📅 當前日期:', currentData[0].date, '查詢基準日:', dateStr);
+          
           const yesterdayData = await getMinuteData('MXF', dateStr, 'regular');
           if (yesterdayData.length > 0) {
             const refPrice = yesterdayData[yesterdayData.length - 1].close;
-            console.log('🔵 日盤參考價（前一天日盤收盤）:', refPrice, '日期:', dateStr);
+            console.log('🔵 日盤參考價（前一交易日收盤）:', refPrice, '日期:', dateStr);
             return refPrice;
           }
         }
@@ -435,6 +446,40 @@ export default function Home() {
     }
     
     loadMinuteData();
+  }, []);
+
+  // 讀取每日分析報告
+  useEffect(() => {
+    async function loadDailyReport() {
+      try {
+        setIsDailyReportLoading(true);
+        const report = await getTodayDailyReport();
+        setDailyReport(report);
+        console.log('📊 載入每日分析:', report ? report.date : '無資料');
+      } catch (error) {
+        console.error('❌ 載入每日分析失敗:', error);
+        setDailyReport(null);
+      } finally {
+        setIsDailyReportLoading(false);
+      }
+    }
+    
+    loadDailyReport();
+    
+    // 每分鐘檢查一次，在 08:01 時自動更新
+    const interval = setInterval(() => {
+      const now = new Date();
+      const hour = now.getHours();
+      const minute = now.getMinutes();
+      
+      // 在 08:01 時重新載入
+      if (hour === 8 && minute === 1) {
+        console.log('🔄 08:01 自動更新每日分析');
+        loadDailyReport();
+      }
+    }, 60000); // 每分鐘檢查一次
+    
+    return () => clearInterval(interval);
   }, []);
 
   // 使用 ref 追蹤定時器是否已啟動
@@ -774,6 +819,12 @@ export default function Home() {
 
             {/* 分隔線 */}
             <div className="my-8 border-t border-gray-200"></div>
+
+            {/* 每日分析報告 */}
+            <DailyAnalysisCard 
+              report={dailyReport}
+              isLoading={isDailyReportLoading}
+            />
           </>
         )}
       </main>

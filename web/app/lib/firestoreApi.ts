@@ -1,8 +1,8 @@
 /**
  * Firestore 資料存取層
- * 讀取分鐘級期貨資料
+ * 讀取分鐘級期貨資料與每日分析
  */
-import { collection, query, orderBy, limit, getDocs, doc, onSnapshot, Unsubscribe, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, doc, getDoc, onSnapshot, Unsubscribe, where } from 'firebase/firestore';
 import { db } from './firebase';
 import type { MinuteBar } from '../types/minuteData';
 
@@ -11,7 +11,7 @@ import type { MinuteBar } from '../types/minuteData';
  * @param date 基準日期
  * @returns 最近的交易日
  */
-function getLastTradingDay(date: Date): Date {
+export function getLastTradingDay(date: Date): Date {
   const result = new Date(date);
   const day = result.getDay();
   
@@ -77,8 +77,8 @@ export async function getMinuteData(
         sell_volume: docData.sell_volume || 0,
         avg_price: docData.avg_price || 0,
         tick_count: docData.tick_count || 0,
-        total_bid: docData.total_bid || 0,
-        total_ask: docData.total_ask || 0,
+        bid_total: docData.total_bid || 0,
+        ask_total: docData.total_ask || 0,
         analysis: docData.analysis
       });
     });
@@ -270,4 +270,73 @@ export function formatDateToYYYYMMDD(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}${month}${day}`;
+}
+
+/**
+ * 每日分析報告類型
+ */
+export interface DailyReport {
+  date: string;          // YYYYMMDD 格式
+  raw_content: string;   // Gemini 生成的分析內容
+  created_at?: string;   // 創建時間
+  model_used?: string;   // 使用的 AI 模型
+}
+
+/**
+ * 取得指定日期的每日分析報告
+ * @param date 日期 (格式: YYYYMMDD)
+ * @returns 每日分析報告，若無資料則返回 null
+ */
+export async function getDailyReport(date: string): Promise<DailyReport | null> {
+  try {
+    const docPath = `daily_reports/${date}`;
+    console.log(`📄 讀取每日分析: ${docPath}`);
+    
+    const docRef = doc(db, docPath);
+    const docSnap = await getDoc(docRef);
+    
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      console.log(`✅ 讀取成功: ${date}`);
+      return {
+        date: date,
+        raw_content: data.raw_content || '',
+        created_at: data.created_at || '',
+        model_used: data.model_used || ''
+      };
+    } else {
+      console.log(`⚠️ 無資料: ${date}`);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ 讀取每日分析失敗:', error);
+    return null;
+  }
+}
+
+/**
+ * 取得今日的每日分析報告
+ * 邏輯：08:00 前查詢前一個交易日的分析，08:01 後查詢當天的分析
+ * @returns 每日分析報告，若無資料則返回 null
+ */
+export async function getTodayDailyReport(): Promise<DailyReport | null> {
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const timeInMinutes = hour * 60 + minute;
+  
+  // 08:00 前使用前一個交易日的日期
+  let dateForQuery = now;
+  if (timeInMinutes <= 8 * 60) {  // 小於等於 08:00
+    dateForQuery = new Date(now);
+    dateForQuery.setDate(dateForQuery.getDate() - 1);
+  }
+  
+  // 確保日期是交易日（排除週末）
+  dateForQuery = getLastTradingDay(dateForQuery);
+  
+  const dateStr = formatDateToYYYYMMDD(dateForQuery);
+  console.log(`📅 查詢每日分析日期: ${dateStr} (當前時間: ${hour}:${String(minute).padStart(2, '0')})`);
+  
+  return getDailyReport(dateStr);
 }
