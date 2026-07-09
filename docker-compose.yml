@@ -7,9 +7,11 @@ services:
       - "4000:4000"   # Emulator UI
       - "8080:8080"   # Firestore
       - "8085:8085"   # PubSub
+      - "9199:9199"   # Storage
     volumes:
       - ./firebase.json:/app/firebase.json
       - ./firestore.rules:/app/firestore.rules
+      - ./storage.rules:/app/storage.rules
       - ./saved-data:/app/saved-data
     environment:
       - NODE_ENV=development

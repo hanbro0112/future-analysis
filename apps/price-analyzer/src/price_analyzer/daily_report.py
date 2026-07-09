@@ -72,7 +72,7 @@ class DailyReportGenerator:
         
         prompt = f"""請幫我分析 {previous_date_str} 台股和美股，概括成以下幾點，最後給我 {current_date_str} 台股日盤的建議
         
-        1. 台指期、加權指數、那斯達克指數、費城半導體指數
+        1. 台指期(日盤和夜盤)、加權指數、那斯達克指數、費城半導體指數
         2. 台積電、TSM (美股)
         """
         

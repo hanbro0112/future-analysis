@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # 添加 apps 目錄到 Python 路徑
 
-from datetime import datetime, time as datetime_time
+from datetime import datetime, time as datetime_time, timedelta
 from decimal import Decimal
 import threading
 
@@ -16,6 +16,7 @@ from firestore_writer import FirestoreWriter
 from .strategy import LongShortAnalyzer, TickData
 from .minute_aggregator import MinuteAggregator, MinuteBar
 from .daily_report import DailyReportGenerator
+from .chip_report import process_chip_report
 
 
 # ========== 獨立回調函數 ==========
@@ -158,6 +159,68 @@ def schedule_daily_report(report_generator: DailyReportGenerator, firestore_writ
         print(f"⚠️  排程每日報告時發生錯誤: {e}")
 
 
+def generate_chip_report(timer_lock: threading.Lock, timer_ref: dict):
+    """生成籌碼快訊報告"""
+    try:
+        now = datetime.now()
+        
+        print(f"\n{'='*60}")
+        print(f"📊 開始處理籌碼快訊 - {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"{'='*60}\n")
+        
+        # 處理籌碼報告
+        success = process_chip_report(now)
+        
+        if success:
+            print(f"{'='*60}")
+            print(f"✅ 籌碼快訊處理完成")
+            print(f"{'='*60}\n")
+        else:
+            print(f"{'='*60}")
+            print(f"❌ 籌碼快訊處理失敗")
+            print(f"{'='*60}\n")
+        
+    except Exception as e:
+        import traceback
+        print(f"❌ 處理籌碼快訊時發生錯誤: {e}")
+        print(f"🔍 詳細錯誤:\n{traceback.format_exc()}\n")
+    
+    finally:
+        # 重新排程下一次執行
+        schedule_chip_report(timer_lock, timer_ref)
+
+
+def schedule_chip_report(timer_lock: threading.Lock, timer_ref: dict):
+    """定時處理籌碼快訊（每交易日 15:21 執行）"""
+    try:
+        now = datetime.now()
+        target_time = datetime.combine(now.date(), datetime_time(15, 21))  # 今天 15:21
+        
+        # 如果已經過了今天的 15:21，計算明天 15:21 的秒數
+        if now >= target_time:
+            target_time += timedelta(days=1)
+        
+        # 計算距離下次執行的秒數
+        seconds_until_target = (target_time - now).total_seconds()
+        
+        # 設定定時器
+        with timer_lock:
+            if timer_ref.get('timer') is not None:  # 確認沒有被取消
+                timer = threading.Timer(
+                    seconds_until_target, 
+                    lambda: generate_chip_report(timer_lock, timer_ref)
+                )
+                timer.daemon = True
+                timer.start()
+                timer_ref['timer'] = timer
+                
+                next_run_time = target_time.strftime('%Y-%m-%d %H:%M:%S')
+                print(f"📊 下次籌碼快訊處理時間: {next_run_time}")
+        
+    except Exception as e:
+        print(f"⚠️  排程籌碼快訊時發生錯誤: {e}")
+
+
 def handle_message(data: dict, analyzer: LongShortAnalyzer, aggregator: MinuteAggregator):
     """處理接收到的 tick 訊息，加入分鐘聚合器"""
     # 驗證必要欄位
@@ -246,6 +309,7 @@ def main():
     # 定時器控制（使用字典來保持可變引用）
     flush_timer_ref = {'timer': None}
     daily_report_timer_ref = {'timer': None}
+    chip_report_timer_ref = {'timer': None}
     timer_lock = threading.Lock()
     
     try:
@@ -316,6 +380,16 @@ def main():
                 daily_report_timer_ref['timer'].start()
             print("📅 每日報告定時器已啟動（每天 8:00 執行）\n")
         
+        # 啟動籌碼快訊定時器
+        with timer_lock:
+            chip_report_timer_ref['timer'] = threading.Timer(
+                1.0,
+                lambda: schedule_chip_report(timer_lock, chip_report_timer_ref)
+            )
+            chip_report_timer_ref['timer'].daemon = True
+            chip_report_timer_ref['timer'].start()
+        print("📊 籌碼快訊定時器已啟動（每交易日 15:21 執行）\n")
+        
         # 啟動自動 flush 定時器
         with timer_lock:
             flush_timer_ref['timer'] = threading.Timer(
@@ -346,6 +420,9 @@ def main():
             if daily_report_timer_ref.get('timer') is not None:
                 daily_report_timer_ref['timer'].cancel()
                 daily_report_timer_ref['timer'] = None
+            if chip_report_timer_ref.get('timer') is not None:
+                chip_report_timer_ref['timer'].cancel()
+                chip_report_timer_ref['timer'] = None
         # 強制完成所有未完成的分鐘資料
         if 'aggregator' in locals():
             print("📦 正在完成剩餘的分鐘資料...")
@@ -360,6 +437,8 @@ def main():
                 flush_timer_ref['timer'].cancel()
             if daily_report_timer_ref.get('timer') is not None:
                 daily_report_timer_ref['timer'].cancel()
+            if chip_report_timer_ref.get('timer') is not None:
+                chip_report_timer_ref['timer'].cancel()
         # 清理資源
         if 'firestore_writer' in locals():
             firestore_writer.close()

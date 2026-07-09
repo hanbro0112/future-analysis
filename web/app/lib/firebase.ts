@@ -3,6 +3,7 @@
  */
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
 // Firebase 配置（使用環境變數或預設值）
 const firebaseConfig = {
@@ -20,18 +21,33 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 // 初始化 Firestore
 export const db = getFirestore(app);
 
+// 初始化 Storage
+export const storage = getStorage(app);
+
 // 連接到 emulator（僅在瀏覽器環境且設定為 true）
-let emulatorConnected = false;
-if (
-  typeof window !== 'undefined' && 
-  process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true' &&
-  !emulatorConnected
-) {
-  try {
-    connectFirestoreEmulator(db, 'localhost', 8080);
-    emulatorConnected = true;
-    console.log('🔧 已連接到 Firestore Emulator');
-  } catch (error) {
-    console.warn('⚠️ Firestore Emulator 連接失敗（可能已連接）');
+let firestoreEmulatorConnected = false;
+let storageEmulatorConnected = false;
+
+if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true') {
+  // Firestore Emulator
+  if (!firestoreEmulatorConnected) {
+    try {
+      connectFirestoreEmulator(db, 'localhost', 8080);
+      firestoreEmulatorConnected = true;
+      console.log('🔧 已連接到 Firestore Emulator');
+    } catch (error) {
+      console.warn('⚠️ Firestore Emulator 連接失敗（可能已連接）');
+    }
+  }
+  
+  // Storage Emulator
+  if (!storageEmulatorConnected) {
+    try {
+      connectStorageEmulator(storage, 'localhost', 9199);
+      storageEmulatorConnected = true;
+      console.log('🔧 已連接到 Storage Emulator');
+    } catch (error) {
+      console.warn('⚠️ Storage Emulator 連接失敗（可能已連接）');
+    }
   }
 }

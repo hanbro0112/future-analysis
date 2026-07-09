@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import QuoteCard from './components/QuoteCard';
 import MinuteChart from './components/MinuteChart';
 import DailyAnalysisCard from './components/DailyAnalysisCard';
+import ChipReportCard from './components/ChipReportCard';
 import { useWebSocket } from './lib/useWebSocket';
 import { isInTradingHours } from './lib/tradingHours';
 
@@ -825,6 +826,12 @@ export default function Home() {
               report={dailyReport}
               isLoading={isDailyReportLoading}
             />
+            
+            {/* 分隔線 */}
+            <div className="my-8 border-t border-gray-200"></div>
+            
+            {/* 籌碼報告 */}
+            <ChipReportCard />
           </>
         )}
       </main>
