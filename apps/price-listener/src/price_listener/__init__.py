@@ -1,6 +1,6 @@
 import sys
 import shioaji as sj
-from shioaji import TickFOPv1, Exchange
+from shioaji import TickFOPv1
 import time
 from pathlib import Path
 
@@ -29,9 +29,9 @@ def init_pubsub():
         exit(1)
 
 
-def quote_callback(exchange: Exchange, tick: TickFOPv1):
+def quote_callback(tick: TickFOPv1):
     """處理報價回調，推送到 Pub/Sub"""
-    print(f"Received tick from {exchange}: {tick}")
+    print(f"Received tick: {tick}")
 
     if tick.simtrade:
         print("⚠️  試撮交易資料，跳過處理")
