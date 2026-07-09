@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 /**
  * 台指期報價卡片元件
@@ -54,7 +54,7 @@ function getSignalColor(signal: string): string {
   if (signal.includes('偏多')) return 'bg-red-100 text-red-700';
   if (signal.includes('強空')) return 'bg-green-600 text-white';
   if (signal.includes('偏空')) return 'bg-green-100 text-green-700';
-  return 'bg-gray-100 text-gray-700';
+  return 'bg-gray-100 dark:bg-gray-700 text-gray-700';
 }
 
 /**
@@ -147,19 +147,19 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
   // 無資料時顯示空框架
   if (!quote) {
     return (
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
         {/* 標題 */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-base font-semibold text-gray-800">
+            <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
               台指期貨
             </h2>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               MXF
             </p>
           </div>
-          <div className="px-3 py-1 rounded-full bg-gray-100">
-            <span className="text-xs font-medium text-gray-400">
+          <div className="px-3 py-1 rounded-full bg-gray-100 dark:bg-gray-700">
+            <span className="text-xs font-medium text-gray-400 dark:text-gray-500">
               --
             </span>
           </div>
@@ -168,14 +168,14 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
         {/* 主要報價 */}
         <div className="mb-4">
           <div className="flex items-baseline gap-3">
-            <span className="text-3xl font-bold text-gray-300">
+            <span className="text-3xl font-bold text-gray-300 dark:text-gray-500">
               --,---
             </span>
             <div className="flex flex-col">
-              <span className="text-base font-semibold text-gray-300">
+              <span className="text-base font-semibold text-gray-300 dark:text-gray-500">
                 --
               </span>
-              <span className="text-sm text-gray-300">
+              <span className="text-sm text-gray-300 dark:text-gray-500">
                 --.--% 
               </span>
             </div>
@@ -184,34 +184,34 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
 
         {/* 每秒成交量長條圖 */}
         <div className="mb-4 flex items-center gap-2">
-          <span className="text-xs text-gray-500 whitespace-nowrap">每秒成交量:</span>
-          <div className="flex-1 relative h-6 bg-gray-100 rounded-full overflow-hidden">
-            <div className="absolute inset-0 flex items-center justify-end px-2 text-xs text-gray-400 pointer-events-none">
+          <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">每秒成交量:</span>
+          <div className="flex-1 relative h-6 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div className="absolute inset-0 flex items-center justify-end px-2 text-xs text-gray-400 dark:text-gray-500 pointer-events-none">
               <span>200</span>
             </div>
           </div>
         </div>
 
         {/* 更新時間與連線狀態 */}
-        <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
-          <p className="text-xs text-gray-500">
+        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
             等待資料...
           </p>
-          <div className="w-2 h-2 rounded-full bg-gray-300" />
+          <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
       {/* 標題 */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-base font-semibold text-gray-800">
+          <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
             {quote.name}
           </h2>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
             {quote.symbol}
           </p>
         </div>
@@ -242,13 +242,13 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
       {/* 每秒成交量長條圖（僅即時模式顯示） */}
       {realtimePrice && (
         <div className="mb-4 flex items-center gap-2">
-          <span className="text-xs text-gray-500 whitespace-nowrap">每秒成交量:</span>
-          <div className="w-56 relative h-4 bg-gray-100 rounded-full overflow-hidden">
+          <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">每秒成交量:</span>
+          <div className="w-56 relative h-4 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
             <div 
               className={`h-full transition-all duration-300 ${getVolumeColor(displayVolume)}`}
               style={{ width: `${volumeWidth}%` }}
             />
-            <div className="absolute inset-0 flex items-center justify-end px-2 text-xs text-gray-400 pointer-events-none">
+            <div className="absolute inset-0 flex items-center justify-end px-2 text-xs text-gray-400 dark:text-gray-500 pointer-events-none">
               <span>200</span>
             </div>
           </div>
@@ -257,9 +257,9 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
 
       {/* 多空信號 */}
       {analysis && (
-        <div className="mb-4 pt-4 border-t border-gray-200">
+        <div className="mb-4 pt-4 border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500">多空信號</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">多空信號</span>
             <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getSignalColor(analysis.signal)}`}>
               {analysis.signal}
             </span>
@@ -271,13 +271,13 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
       {analysis && (
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
-            <p className="text-xs text-gray-500 mb-1">市場情緒</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">市場情緒</p>
             <p className={`text-sm font-medium ${getSentimentColor(analysis.sentiment_label)}`}>
               {analysis.sentiment_label}
             </p>
           </div>
           <div>
-            <p className="text-xs text-gray-500 mb-1">成交量</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">成交量</p>
             <p className="text-sm font-medium text-blue-600">
               {analysis.volume_explosion_level}
             </p>
@@ -287,15 +287,15 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
 
       {/* 期現價差與價差信號 */}
       {basis != null && (
-        <div className="grid grid-cols-2 gap-4 mb-4 pt-2 border-t border-gray-200">
+        <div className="grid grid-cols-2 gap-4 mb-4 pt-2 border-t border-gray-200 dark:border-gray-700">
           <div>
-            <p className="text-xs text-gray-500 mb-1">期現價差</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">期現價差</p>
             <p className={`text-sm font-medium ${basisColor}`}>
               {basis > 0 ? '+' : ''}{basis.toFixed(0)}
             </p>
           </div>
           <div>
-            <p className="text-xs text-gray-500 mb-1">價差信號</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">價差信號</p>
             <p className={`text-sm font-medium ${basisColor}`}>
               {basisSignal}
             </p>
@@ -304,8 +304,8 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
       )}
 
       {/* 更新時間與連線狀態 */}
-      <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
-        <p className="text-xs text-gray-500">
+      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           {updateTime ? `更新時間: ${updateTime}` : '等待資料...'}
         </p>
         <div className={`w-2 h-2 rounded-full ${

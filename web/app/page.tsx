@@ -10,6 +10,7 @@ import QuoteCard from './components/QuoteCard';
 import MinuteChart from './components/MinuteChart';
 import DailyAnalysisCard from './components/DailyAnalysisCard';
 import ChipReportCard from './components/ChipReportCard';
+import ThemeToggle from './components/ThemeToggle';
 import { useWebSocket } from './lib/useWebSocket';
 import { isInTradingHours } from './lib/tradingHours';
 
@@ -743,16 +744,22 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* 頁面標題 */}
-      <header className="bg-white border-b border-gray-200 shadow-sm">
+      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <h1 className="text-xl font-bold text-gray-800">
-            期貨資訊分析
-          </h1>
-          <p className="text-xs text-gray-500 mt-1">
-            台指期分鐘級走勢與多空分析
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">
+                期貨資訊分析
+              </h1>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                台指期分鐘級走勢與多空分析
+              </p>
+            </div>
+            {/* 主題切換按鈕 */}
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 
@@ -760,8 +767,8 @@ export default function Home() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {isLoading ? (
           <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            <p className="mt-4 text-gray-600">載入資料中...</p>
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 dark:border-blue-400"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-300">載入資料中...</p>
           </div>
         ) : (
           <>
@@ -772,7 +779,7 @@ export default function Home() {
                 className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
                   marketType === 'regular'
                     ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600'
                 }`}
               >
                 {getDaySessionLabel()}
@@ -782,7 +789,7 @@ export default function Home() {
                 className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
                   marketType === 'after_hours'
                     ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600'
                 }`}
               >
                 {getNightSessionLabel()}

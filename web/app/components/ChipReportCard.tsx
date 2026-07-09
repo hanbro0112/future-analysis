@@ -139,38 +139,38 @@ export default function ChipReportCard({ className = '' }: ChipReportCardProps) 
   }, []);
 
   return (
-    <div className={`bg-white rounded-lg shadow-md p-6 ${className}`}>
+    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 ${className}`}>
       <div className="mb-4">
-        <h2 className="text-xl font-bold text-gray-800">
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
           📊 散戶多空比 ({formatDateForDisplay(reportDate)})
         </h2>
-        <p className="text-sm text-gray-500 mt-1">
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
           資料來源：永豐期貨籌碼快訊（每交易日 15:21 更新）
         </p>
       </div>
       
       {isLoading ? (
-        <div className="flex items-center justify-center h-64 text-gray-500">
+        <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 dark:border-blue-400 mx-auto mb-4"></div>
             <p>載入中...</p>
           </div>
         </div>
       ) : error ? (
-        <div className="flex items-center justify-center h-64 text-red-500">
+        <div className="flex items-center justify-center h-64 text-red-500 dark:text-red-400">
           <div className="text-center">
             <p className="text-lg">⚠️ {error}</p>
-            <p className="text-sm mt-2 text-gray-500">請稍後再試</p>
+            <p className="text-sm mt-2 text-gray-500 dark:text-gray-400">請稍後再試</p>
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* 微台散戶多空比 (左邊) */}
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
             <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-4 py-2">
               <h3 className="text-white font-semibold">微台散戶多空比 (TMF)</h3>
             </div>
-            <div className="p-2 bg-gray-50">
+            <div className="p-2 bg-gray-50 dark:bg-gray-900">
               {tmfImageUrl ? (
                 <img 
                   src={tmfImageUrl} 
@@ -187,11 +187,11 @@ export default function ChipReportCard({ className = '' }: ChipReportCardProps) 
           </div>
           
           {/* 小台散戶多空比 (右邊) */}
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
             <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-2">
               <h3 className="text-white font-semibold">小台散戶多空比 (MTX)</h3>
             </div>
-            <div className="p-2 bg-gray-50">
+            <div className="p-2 bg-gray-50 dark:bg-gray-900">
               {mtxImageUrl ? (
                 <img 
                   src={mtxImageUrl} 

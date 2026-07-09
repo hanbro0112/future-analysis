@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceDot } from 'recharts'
@@ -80,26 +80,26 @@ const CustomTooltip = ({ active, payload }: any) => {
     
     return (
       <div className="bg-white/95 backdrop-blur-sm border border-gray-300 rounded-lg p-3 shadow-lg">
-        <p className="font-semibold text-gray-800 mb-2 text-xs">{displayTime}</p>
+        <p className="font-semibold text-gray-800 dark:text-gray-100 mb-2 text-xs">{displayTime}</p>
         <div className="space-y-1 text-xs">
-          <p className="text-gray-700">
+          <p className="text-gray-700 dark:text-gray-300">
             平均價: <span className="font-semibold text-blue-600">{data.avg_price.toFixed(0)}</span>
           </p>
           {data.taiex != null && (
-            <p className="text-gray-700">
+            <p className="text-gray-700 dark:text-gray-300">
               加權指數: <span className="font-semibold text-yellow-600">{data.taiex.toFixed(2)}</span>
             </p>
           )}
-          <p className="text-gray-700">
+          <p className="text-gray-700 dark:text-gray-300">
             最高價: <span className="font-semibold text-red-600">{data.high.toFixed(0)}</span>
           </p>
-          <p className="text-gray-700">
+          <p className="text-gray-700 dark:text-gray-300">
             最低價: <span className="font-semibold text-green-600">{data.low.toFixed(0)}</span>
           </p>
-          <p className="text-gray-700">
+          <p className="text-gray-700 dark:text-gray-300">
             成交量: <span className="font-semibold">{data.volume.toLocaleString()}</span>
           </p>
-          <div className="flex gap-3 pt-1 border-t border-gray-200 mt-2">
+          <div className="flex gap-3 pt-1 border-t border-gray-200 dark:border-gray-700 mt-2">
             <p className="text-red-600 text-xs">
               買: {data.buy_volume.toLocaleString()}
             </p>
@@ -706,12 +706,12 @@ const MinuteChart = ({ data, dayData, nightData, title = '分鐘級走勢', mark
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-base font-semibold text-gray-800">{title}</h3>
+        <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100">{title}</h3>
         <div className="flex items-center gap-3">
           {!isLoading && hasTaiex && (
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer hover:text-gray-800 transition-colors">
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-800 dark:hover:text-gray-100 transition-colors">
               <input
                 type="checkbox"
                 checked={showTaiex}
@@ -722,7 +722,7 @@ const MinuteChart = ({ data, dayData, nightData, title = '分鐘級走勢', mark
             </label>
           )}
           {!isLoading && (
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer hover:text-gray-800 transition-colors">
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-800 dark:hover:text-gray-100 transition-colors">
               <input
                 type="checkbox"
                 checked={showHighLow}

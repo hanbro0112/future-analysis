@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 /**
  * 台指期折線圖元件
