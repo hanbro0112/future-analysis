@@ -335,7 +335,7 @@ def main():
         project_id = config['gcp_project_id']
         
         # 確保 Topic 存在（若無則自動創建）
-        from google.cloud.pubsub_v1 import PublisherClient, SubscriberClient
+        from google.cloud.pubsub_v1 import PublisherClient
         publisher_client = PublisherClient()
         topic_path = publisher_client.topic_path(project_id, topic_id)
         
@@ -346,27 +346,11 @@ def main():
             publisher_client.create_topic(request={"name": topic_path})
             print(f"✅ Topic 已創建: {topic_id}")
         
-        # 確保 Subscription 存在並綁定到 Topic
-        subscriber_client = SubscriberClient()
-        subscription_path = subscriber_client.subscription_path(project_id, subscription_id)
-        topic_path = f"projects/{project_id}/topics/{topic_id}"
-        
-        try:
-            subscriber_client.get_subscription(request={"subscription": subscription_path})
-            print(f"✅ Subscription 已存在: {subscription_id}")
-        except Exception:
-            try:
-                subscriber_client.create_subscription(
-                    request={"name": subscription_path, "topic": topic_path}
-                )   
-                print(f"✅ Subscription 已創建並綁定到 Topic: {subscription_id} -> {topic_id}")
-            except Exception as e:
-                print(f"⚠️  創建 Subscription 失敗: {e}")
-        
-        # 初始化 Pub/Sub Subscriber
+        # 初始化 Pub/Sub Subscriber（會自動確保訂閱存在）
         subscriber = PubSubSubscriber(
             project_id=project_id,
-            subscription_id=subscription_id
+            subscription_id=subscription_id,
+            topic_id=topic_id
         )
 
         # 啟動每日報告定時器

@@ -389,13 +389,15 @@ class PriceBroadcaster:
             topic_id = config['pubsub_topic_id']
             subscription_id = config['pubsub_subscription_id']
             project_id = config['gcp_project_id']
+            topic_id = config['pubsub_topic_id']
             
             print(f"🚀 開始訂閱 Pub/Sub: {project_id}/{subscription_id}")
             
             # 初始化訂閱器（保存引用以便關閉時清理）
             self.subscriber = PubSubSubscriber(
                 project_id=project_id,
-                subscription_id=subscription_id
+                subscription_id=subscription_id,
+                topic_id=topic_id
             )
             
             # 在背景執行緒中訂閱（阻塞式）

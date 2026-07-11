@@ -186,16 +186,18 @@ class PubSubPublisher:
 class PubSubSubscriber:
     """Pub/Sub 訂閱者輔助類別"""
     
-    def __init__(self, project_id: str, subscription_id: str):
+    def __init__(self, project_id: str, subscription_id: str, topic_id: Optional[str] = None):
         """
         初始化訂閱者
         
         Args:
             project_id: GCP 專案 ID
             subscription_id: 訂閱 ID
+            topic_id: Topic ID（可選，用於自動創建訂閱）
         """
         self.project_id = project_id
         self.subscription_id = subscription_id
+        self.topic_id = topic_id
         self.subscriber = pubsub_v1.SubscriberClient()
         self.subscription_path = self.subscriber.subscription_path(
             project_id, subscription_id
@@ -206,6 +208,59 @@ class PubSubSubscriber:
             print(f"🔧 使用 Pub/Sub Emulator: {os.getenv('PUBSUB_EMULATOR_HOST')}")
         else:
             print(f"☁️  連接到正式 Pub/Sub 環境")
+    
+    def subscription_exists(self) -> bool:
+        """
+        檢查訂閱是否存在
+        
+        Returns:
+            True 如果存在，否則 False
+        """
+        try:
+            self.subscriber.get_subscription(request={"subscription": self.subscription_path})
+            return True
+        except Exception:
+            return False
+    
+    def create_subscription(self) -> str:
+        """
+        建立訂閱
+        
+        Returns:
+            訂閱路徑
+        """
+        if not self.topic_id:
+            raise ValueError("無法建立訂閱：未提供 topic_id")
+        
+        topic_path = f"projects/{self.project_id}/topics/{self.topic_id}"
+        
+        try:
+            subscription = self.subscriber.create_subscription(
+                request={
+                    "name": self.subscription_path,
+                    "topic": topic_path
+                }
+            )
+            print(f"✅ 訂閱建立成功: {subscription.name}")
+            return subscription.name
+        except AlreadyExists:
+            print(f"ℹ️  訂閱已存在: {self.subscription_path}")
+            return self.subscription_path
+        except Exception as e:
+            print(f"❌ 建立訂閱失敗: {e}")
+            raise
+    
+    def ensure_subscription_exists(self) -> str:
+        """
+        確保訂閱存在，不存在則自動建立
+        
+        Returns:
+            訂閱路徑
+        """
+        if self.subscription_exists():
+            return self.subscription_path
+        
+        return self.create_subscription()
     
     def subscribe(
         self,
@@ -223,6 +278,14 @@ class PubSubSubscriber:
             max_retries: 最大重試次數（0 表示無限重試）
             retry_delay: 重試延遲時間（秒）
         """
+        # 確保訂閱存在
+        try:
+            self.ensure_subscription_exists()
+        except Exception as e:
+            print(f"❌ 無法確保訂閱存在: {e}")
+            if not self.subscription_exists():
+                raise
+        
         def message_callback(message: pubsub_v1.subscriber.message.Message) -> None:
             """處理接收到的訊息"""
             try:
