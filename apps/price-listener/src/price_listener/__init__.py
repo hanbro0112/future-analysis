@@ -135,33 +135,91 @@ def on_session_down(resp_code: int, event_code: int, info: str, event: str):
     """
     處理會話斷線事件
     
-    Args:
-        resp_code: 回應代碼
-        event_code: 事件代碼
-        info: 錯誤訊息
-        event: 事件類型
+    Shioaji 事件回調的參數格式：
+    - resp_code: 回應代碼
+    - event_code: 事件代碼 (1 = Session down, 其他為其他事件)
+    - info: 錯誤訊息
+    - event: 事件類型字串
     """
     global is_reconnecting, is_session_active
     
-    is_session_active = False
-    timestamp = datetime.now()
+    try:
+        # 只處理 Session down 事件 (event_code == 1)
+        if event_code != 1:
+            print(f"ℹ️  收到事件: {event} (code: {event_code}, resp: {resp_code})")
+            return
+        
+        is_session_active = False
+        timestamp = datetime.now()
+        
+        print(f"\n{'='*60}")
+        print(f"⚠️ [{timestamp.strftime('%Y-%m-%d %H:%M:%S')}] 會話斷線事件觸發")
+        print(f"{'='*60}")
+        print(f"回應代碼: {resp_code}")
+        print(f"事件代碼: {event_code}")
+        print(f"事件類型: {event}")
+        print(f"詳細訊息: {info}")
+        print(f"{'='*60}\n")
+        
+        # 檢查是否在交易時段內
+        in_trading_hours = is_trading_hours(timestamp)
+        
+        if in_trading_hours and not is_reconnecting:
+            print("🔴 警告：交易時段內斷線，立即重新連接...")
+            is_reconnecting = True
+            reconnect()
+        else:
+            print("ℹ️  盤後時間斷線，將在下次交易時段開始前自動重連")
+            print("💤 進入待機模式，等待交易時段...")
+            
+    except Exception as e:
+        print(f"❌ on_session_down 處理錯誤: {e}")
+        print(f"   參數: resp_code={resp_code}, event_code={event_code}, event={event}")
+        import traceback
+        traceback.print_exc()
+
+
+def on_event_universal(*args, **kwargs):
+    """
+    通用事件處理器（用於調試）
+    接受任意參數格式
+    """
+    print(f"\n🔍 [調試] 通用事件處理器被觸發")
+    print(f"   args: {args}")
+    print(f"   kwargs: {kwargs}")
+    print(f"   args 數量: {len(args)}")
     
-    print(f"\n⚠️ [{timestamp.strftime('%Y-%m-%d %H:%M:%S')}] 會話斷線")
-    print(f"   回應代碼: {resp_code}")
-    print(f"   事件代碼: {event_code}")
-    print(f"   事件類型: {event}")
-    print(f"   詳細訊息: {info}\n")
-    
-    # 檢查是否在交易時段內
-    in_trading_hours = is_trading_hours(timestamp)
-    
-    if in_trading_hours and not is_reconnecting:
-        print("🔴 警告：交易時段內斷線，立即重新連接...")
-        is_reconnecting = True
-        reconnect()
+    # 嘗試解析參數
+    if len(args) >= 4:
+        resp_code, event_code, info, event = args[0], args[1], args[2], args[3]
+        on_session_down(resp_code, event_code, info, event)
+    elif len(args) == 1:
+        # 可能是一個對象
+        event_obj = args[0]
+        print(f"   事件對象類型: {type(event_obj)}")
+        print(f"   事件對象: {event_obj}")
+        
+        # 嘗試提取屬性
+        try:
+            if hasattr(event_obj, 'resp_code'):
+                on_session_down(
+                    event_obj.resp_code,
+                    event_obj.event_code,
+                    event_obj.info,
+                    event_obj.event
+                )
+            elif isinstance(event_obj, dict):
+                on_session_down(
+                    event_obj.get('resp_code', 0),
+                    event_obj.get('event_code', 0),
+                    event_obj.get('info', ''),
+                    event_obj.get('event', '')
+                )
+        except Exception as e:
+            print(f"   ❌ 解析事件對象失敗: {e}")
     else:
-        print("ℹ️  盤後時間斷線，將在下次交易時段開始前自動重連")
-        print("💤 進入待機模式，等待交易時段...")
+        print(f"   ⚠️ 無法識別的參數格式")
+    print()
 
 
 def reconnect():
@@ -189,7 +247,7 @@ def reconnect():
             api_instance.quote.set_on_tick_fop_v1_callback(quote_callback)
             
             # 註冊斷線事件處理
-            api_instance.set_on_event_callback(on_session_down)
+            api_instance.set_event_callback(on_event_universal)
             
             # 重新訂閱合約
             subscribe_contracts(api_instance)
@@ -277,7 +335,8 @@ def main() -> None:
     
     # 註冊會話斷線事件處理
     print("🔧 註冊會話事件處理器...")
-    api_instance.set_on_event_callback(on_session_down)
+    api_instance.set_event_callback(on_event_universal)
+    print("✅ 事件處理器註冊完成（使用通用處理器進行調試）")
     
     # 訂閱合約
     subscribe_contracts(api_instance)
