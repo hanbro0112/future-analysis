@@ -2,6 +2,7 @@ import sys
 import shioaji as sj
 from shioaji import TickFOPv1
 import time
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -165,9 +166,11 @@ def on_session_down(resp_code: int, event_code: int, info: str, event: str):
         in_trading_hours = is_trading_hours(timestamp)
         
         if in_trading_hours and not is_reconnecting:
-            print("🔴 警告：交易時段內斷線，立即重新連接...")
+            print("🔴 警告：交易時段內斷線，啟動重新連接...")
             is_reconnecting = True
-            reconnect()
+            # 在單獨的線程中執行重連，避免阻塞事件處理
+            reconnect_thread = threading.Thread(target=reconnect, daemon=True)
+            reconnect_thread.start()
         else:
             print("ℹ️  盤後時間斷線，將在下次交易時段開始前自動重連")
             print("💤 進入待機模式，等待交易時段...")
@@ -233,23 +236,31 @@ def reconnect():
             # 清理舊連接
             if api_instance:
                 try:
+                    print(f"   🔌 正在登出舊連接...")
                     api_instance.logout()
-                except:
-                    pass
+                    print(f"   ✅ 舊連接已登出")
+                except Exception as e:
+                    print(f"   ⚠️ 登出失敗: {e}")
             
             # 等待一段時間再重連
+            print(f"   ⏳ 等待 {reconnect_delay} 秒...")
             time.sleep(reconnect_delay)
             
             # 重新建立連接
+            print(f"   🔌 正在重新連接 Shioaji API...")
             api_instance = get_shioaji_client()
+            print(f"   ✅ API 連接成功")
             
             # 重新註冊回調函數
+            print(f"   📝 註冊報價回調...")
             api_instance.quote.set_on_tick_fop_v1_callback(quote_callback)
             
             # 註冊斷線事件處理
+            print(f"   📝 註冊事件回調...")
             api_instance.set_event_callback(on_event_universal)
             
             # 重新訂閱合約
+            print(f"   📡 重新訂閱合約...")
             subscribe_contracts(api_instance)
             
             print(f"✅ 第 {attempt} 次重連成功！")
@@ -260,6 +271,8 @@ def reconnect():
             
         except Exception as e:
             print(f"❌ 第 {attempt} 次重連失敗: {e}")
+            import traceback
+            traceback.print_exc()
             
             if attempt < max_reconnect_attempts:
                 wait_time = reconnect_delay * attempt  # 指數退避
@@ -268,6 +281,8 @@ def reconnect():
     
     print(f"❌ 重連失敗，已達最大重試次數 ({max_reconnect_attempts})")
     is_reconnecting = False
+    is_session_active = False
+    return False
     is_session_active = False
     return False
 
