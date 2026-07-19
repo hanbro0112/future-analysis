@@ -11,8 +11,12 @@ import MinuteChart from './components/MinuteChart';
 import DailyAnalysisCard from './components/DailyAnalysisCard';
 import ChipReportCard from './components/ChipReportCard';
 import ThemeToggle from './components/ThemeToggle';
+import LoginScreen from './components/LoginScreen';
 import { useWebSocket } from './lib/useWebSocket';
 import { isInTradingHours } from './lib/tradingHours';
+import { useAuth } from './lib/AuthContext';
+import { auth } from './lib/firebase';
+import { onIdTokenChanged } from 'firebase/auth';
 
 import { 
   getTodayMinuteData, 
@@ -26,6 +30,9 @@ import {
 } from './lib/firestoreApi';
 import type { TaifexQuote } from './types/futures';
 import type { MinuteBar, MinuteChartPoint, AnalysisResult } from './types/minuteData';
+
+// Price Broadcaster WebSocket 網址（本地開發預設連 localhost，正式環境由環境變數指定）
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8001/ws/price';
 
 /**
  * 根據當前時間判斷預設盤面類型（包含延後 3 分鐘以更新最後一筆資料）
@@ -69,27 +76,6 @@ const getDefaultMarketType = (): 'regular' | 'after_hours' => {
     // 其他時間（05:03-08:45 或 13:48-15:00）=> 預設夜盤
     return 'after_hours';
   }
-};
-
-/**
- * 獲取最近的交易日（排除週末）
- * @param date 基準日期
- * @returns 最近的交易日
- */
-const getLastTradingDay = (date: Date): Date => {
-  const result = new Date(date);
-  const day = result.getDay();
-  
-  // 如果是週六，往前推到週五
-  if (day === 6) {
-    result.setDate(result.getDate() - 1);
-  }
-  // 如果是週日，往前推到週五
-  else if (day === 0) {
-    result.setDate(result.getDate() - 2);
-  }
-  
-  return result;
 };
 
 /**
@@ -168,6 +154,28 @@ const getNightSessionLabel = (): string => {
 };
 
 export default function Home() {
+  const { user, loading: authLoading, signOut } = useAuth();
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <p className="text-sm text-gray-500 dark:text-gray-400">載入中...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-screen flex-col bg-gray-50 dark:bg-gray-900">
+        <LoginScreen />
+      </div>
+    );
+  }
+
+  return <Dashboard onSignOut={signOut} />;
+}
+
+function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
   // 分鐘級資料狀態
   const [allMinuteData, setAllMinuteData] = useState<MinuteBar[]>([]); // 所有資料
   const [minuteData, setMinuteData] = useState<MinuteBar[]>([]); // 當前顯示的資料
@@ -185,9 +193,19 @@ export default function Home() {
   const [dailyReport, setDailyReport] = useState<DailyReport | null>(null); // 每日分析報告
   const [isDailyReportLoading, setIsDailyReportLoading] = useState(true); // 每日分析載入狀態
 
-  // WebSocket 即時報價連接
+  // 取得 Firebase ID Token，供 WebSocket 連線驗證使用
+  const [wsToken, setWsToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
+      setWsToken(firebaseUser ? await firebaseUser.getIdToken() : null);
+    });
+    return unsubscribe;
+  }, []);
+
+  // WebSocket 即時報價連接（未取得 Token 前不建立連線）
   const { prices: realtimePrices, isConnected: wsConnected } = useWebSocket(
-    'ws://localhost:8001/ws/price'
+    wsToken ? `${WS_URL}?token=${encodeURIComponent(wsToken)}` : null
   );
 
   // 使用 useMemo 提取即時報價，避免不必要的重新渲染
@@ -757,8 +775,17 @@ export default function Home() {
                 台指期分鐘級走勢與多空分析
               </p>
             </div>
-            {/* 主題切換按鈕 */}
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              {/* 主題切換按鈕 */}
+              <ThemeToggle />
+              {/* 登出按鈕 */}
+              <button
+                onClick={onSignOut}
+                className="p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm text-gray-700 dark:text-gray-200 transition-colors"
+              >
+                登出
+              </button>
+            </div>
           </div>
         </div>
       </header>

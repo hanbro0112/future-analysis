@@ -20,6 +20,8 @@ from config import config
 from pubsub import PubSubSubscriber
 from firestore_writer import FirestoreWriter
 
+from .auth import verify_firebase_token, InvalidTokenError
+
 
 class TickData:
     """Tick 資料"""
@@ -98,6 +100,14 @@ class PriceBroadcaster:
         
         @self.app.websocket("/ws/price")
         async def websocket_endpoint(websocket: WebSocket):
+            token = websocket.query_params.get("token")
+            try:
+                verify_firebase_token(token)
+            except InvalidTokenError as e:
+                print(f"❌ WebSocket 驗證失敗: {e}")
+                await websocket.close(code=4401)
+                return
+
             await self.handle_websocket(websocket)
     
     async def handle_websocket(self, websocket: WebSocket):

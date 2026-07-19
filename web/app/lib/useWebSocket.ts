@@ -29,12 +29,12 @@ export interface UseWebSocketResult {
 
 /**
  * WebSocket Hook 用於接收即時報價
- * @param url WebSocket 伺服器地址
+ * @param url WebSocket 伺服器地址，傳入 null 時不建立連線（例如尚未取得驗證 Token）
  * @param autoReconnect 是否自動重連 (預設: true)
  * @param reconnectInterval 重連間隔 (ms, 預設: 10000)
  */
 export function useWebSocket(
-  url: string,
+  url: string | null,
   autoReconnect: boolean = true,
   reconnectInterval: number = 10000
 ): UseWebSocketResult {
@@ -50,6 +50,12 @@ export function useWebSocket(
     isMountedRef.current = true;
 
     function connect() {
+      // 尚未取得連線位址（例如尚未取得驗證 Token）時不連線
+      if (!url) {
+        setIsConnected(false);
+        return;
+      }
+
       // 僅在交易時段建立連線
       if (!isInTradingHours()) {
         setIsConnected(false);

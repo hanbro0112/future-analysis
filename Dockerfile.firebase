@@ -13,7 +13,7 @@ RUN firebase setup:emulators:firestore
 RUN firebase setup:emulators:pubsub
 
 # 暴露常用的 Port
-# 4000: UI, 8080: Firestore, 8085: PubSub
-EXPOSE 4000 8080 8085
+# 4000: UI, 8080: Firestore, 8085: PubSub, 9099: Auth
+EXPOSE 4000 8080 8085 9099
 
-CMD ["firebase", "emulators:start", "--project", "demo-project"]
+CMD ["firebase", "emulators:start", "--project", "如demo-project"]

@@ -4,6 +4,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
+import { getAuth, connectAuthEmulator, GoogleAuthProvider } from 'firebase/auth';
 
 // Firebase 配置（使用環境變數或預設值）
 const firebaseConfig = {
@@ -24,9 +25,16 @@ export const db = getFirestore(app);
 // 初始化 Storage
 export const storage = getStorage(app);
 
+// 初始化 Auth
+export const auth = getAuth(app);
+
+// Google 登入 Provider
+export const googleAuthProvider = new GoogleAuthProvider();
+
 // 連接到 emulator（僅在瀏覽器環境且設定為 true）
 let firestoreEmulatorConnected = false;
 let storageEmulatorConnected = false;
+let authEmulatorConnected = false;
 
 if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true') {
   // Firestore Emulator
@@ -48,6 +56,17 @@ if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULAT
       console.log('🔧 已連接到 Storage Emulator');
     } catch (error) {
       console.warn('⚠️ Storage Emulator 連接失敗（可能已連接）');
+    }
+  }
+
+  // Auth Emulator
+  if (!authEmulatorConnected) {
+    try {
+      connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
+      authEmulatorConnected = true;
+      console.log('🔧 已連接到 Auth Emulator');
+    } catch (error) {
+      console.warn('⚠️ Auth Emulator 連接失敗（可能已連接）');
     }
   }
 }

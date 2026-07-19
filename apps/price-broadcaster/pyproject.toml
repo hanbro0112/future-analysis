@@ -11,6 +11,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "websockets>=13.0",
+    "firebase-admin>=6.5.0",
 ]
 
 [tool.uv.scripts]
@@ -19,3 +20,8 @@ start = "python main.py"
 [tool.uv.sources]
 pubsub = { workspace = true }
 firestore-writer = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
