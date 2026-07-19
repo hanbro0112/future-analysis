@@ -232,8 +232,16 @@ class PubSubSubscriber:
         if not self.topic_id:
             raise ValueError("無法建立訂閱：未提供 topic_id")
         
-        topic_path = f"projects/{self.project_id}/topics/{self.topic_id}"
+        # 確保 topic 存在（使用 Publisher 來建立 topic）
+        try:
+            publisher = PubSubPublisher(project_id=self.project_id)
+            topic_path = publisher.ensure_topic_exists(self.topic_id)
+            print(f"✅ Topic 已確認存在: {topic_path}")
+        except Exception as e:
+            print(f"❌ 確保 topic 存在時失敗: {e}")
+            raise
         
+        # 建立訂閱
         try:
             subscription = self.subscriber.create_subscription(
                 request={

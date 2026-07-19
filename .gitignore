@@ -44,3 +44,6 @@ Sinopac.pfx
 
 # Firebase emulator saved data
 saved-data/
+
+# claude 個人設定檔
+.claude/settings.local.json
