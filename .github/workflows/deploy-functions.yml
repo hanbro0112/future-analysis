@@ -12,14 +12,6 @@ on:
           - both
           - daily-report
           - chip-report
-      branch:
-        description: "選擇部署的分支"
-        required: true
-        default: main
-        type: choice
-        options:
-          - main
-          - dev
 
 # WIF 驗證需要讀取 OIDC ID Token 的權限
 permissions:
@@ -34,8 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.branch }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
