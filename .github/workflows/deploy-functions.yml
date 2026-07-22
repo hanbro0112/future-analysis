@@ -51,8 +51,6 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
-
       - name: 部署 daily-report
         if: ${{ inputs.target == 'both' || inputs.target == 'daily-report' }}
         run: |
@@ -67,22 +65,27 @@ jobs:
             --no-allow-unauthenticated \
             --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}" \
             --set-secrets=GEMINI_API_KEY=gemini-api-key:latest \
-            --memory=512Mi \
+            --memory=128Mi \
             --timeout=180s \
             --min-instances=0 \
             --max-instances=1 \
             --ingress-settings=internal-only
 
-      # - name: 部署 chip-report
-      #   if: ${{ inputs.target == 'both' || inputs.target == 'chip-report' }}
-      #   run: |
-      #     gcloud functions deploy chip-report \
-      #       --gen2 \
-      #       --project="${{ secrets.GCP_PROJECT_ID }}" \
-      #       --runtime=python314 \
-      #       --region="${{ env.REGION }}" \
-      #       --source=apps/functions \
-      #       --entry-point=chip_report \
-      #       --trigger-http \
-      #       --no-allow-unauthenticated \
-      #       --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+      - name: 部署 chip-report
+        if: ${{ inputs.target == 'both' || inputs.target == 'chip-report' }}
+        run: |
+          gcloud functions deploy chip-report \
+            --gen2 \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --runtime=python314 \
+            --region="${{ env.REGION }}" \
+            --source=apps/functions \
+            --entry-point=chip_report \
+            --trigger-http \
+            --no-allow-unauthenticated \
+            --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}" \
+            --memory=256Mi \
+            --timeout=30s \
+            --min-instances=0 \
+            --max-instances=1 \
+            --ingress-settings=internal-only

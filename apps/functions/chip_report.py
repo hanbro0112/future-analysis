@@ -338,7 +338,6 @@ def chip_report(request):
     except Exception as e:
         import traceback
         print(f"❌ 處理籌碼快訊時發生錯誤: {e}")
-        print(f"🔍 詳細錯誤:\n{traceback.format_exc()}\n")
         return f"籌碼快訊處理失敗: {e}", 500
 
     if success:

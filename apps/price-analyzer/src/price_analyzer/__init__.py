@@ -63,7 +63,6 @@ def on_minute_complete(minute_bar: MinuteBar, firestore_writer: FirestoreWriter,
     except Exception as e:
         import traceback
         print(f"❌ 儲存分鐘資料時發生錯誤: {type(e).__name__}: {e}")
-        print(f"🔍 詳細錯誤:\n{traceback.format_exc()}\n")
 
 
 def schedule_auto_flush(aggregator: MinuteAggregator, timer_lock: threading.Lock, timer_ref: dict):
@@ -120,7 +119,6 @@ def handle_message(data: dict, analyzer: LongShortAnalyzer, aggregator: MinuteAg
     except Exception as e:
         import traceback
         print(f"❌ 處理資料時發生錯誤: {type(e).__name__}: {e}")
-        print(f"🔍 詳細錯誤:\n{traceback.format_exc()}\n")
 
 
 # ========== 工具函數 ==========

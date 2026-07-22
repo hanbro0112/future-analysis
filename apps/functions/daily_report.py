@@ -228,5 +228,4 @@ def daily_report(request):
     except Exception as e:
         import traceback
         print(f"❌ 生成每日報告時發生錯誤: {e}")
-        print(f"🔍 詳細錯誤:\n{traceback.format_exc()}\n")
         return f"每日報告生成失敗: {e}", 500
