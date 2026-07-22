@@ -1,27 +1,3 @@
-# future-analysis
-分析台指期多空交易資訊
-
-
-
-
-# firestore data structure
-market (Collection)
-  ┗ 📄 MXF (Document - 商品代碼，如小台指期全)
-        ┗ 📂 20260617 (Subcollection - 交易日)
-            ┗ 📄 0901 (Document ID: 時分 - 每分鐘資訊分析)
-            ┗ 📄 0902 
-              ├── timestamp: 2026-06-15T09:01:00Z (Timestamp)
-              ├── date: "2026-06-15" (String)
-              ├── market_type: "regular" (String - regular / after_hours 日盤/夜盤)
-              ├── open: 21850 (Number)
-              ├── high: 21865 (Number)
-              ├── low: 21840 (Number)
-              ├── close: 21855 (Number)
-              ├── volume: 1250 (Number - 分鐘總成交量)
-              └── 其他分析資料
-
-
-# tick data structure
 Tick(
     code='MXFF6',                                  # 期貨商品代碼 (例如：MXFF6 代表 微型臺指期貨 2026年6月合約)
     datetime=datetime.datetime(2026, 5, 25, 16, 19, 39, 243000), # 交易所派發該筆行情的時間 (精確至微秒)

@@ -1,0 +1,20 @@
+{
+    "eslint.enable": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.eslint": "explicit",
+    },
+    
+    "eslint.validate": [
+      "javascript",
+      "javascriptreact",
+      "typescript",
+      "typescriptreact",
+    ],
+    
+    "files.associations": {
+      "justfile": "plaintext", // justfile 默認識別為 dockerFile
+      "justfile.windows": "plaintext",
+
+      "*.rules": "firestorerules", // vscode 套件安裝 firestore rules
+    }
+}

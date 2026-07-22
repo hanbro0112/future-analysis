@@ -1,0 +1,23 @@
+services:
+  firebase-emulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.firebase
+    ports:
+      - "4000:4000"   # Emulator UI
+      - "8080:8080"   # Firestore
+      - "8085:8085"   # PubSub
+      - "9199:9199"   # Storage
+      - "9099:9099"   # Auth
+    volumes:
+      - ./firebase.json:/app/firebase.json
+      - ./firestore.rules:/app/firestore.rules
+      - ./storage.rules:/app/storage.rules
+      - ./saved-data:/app/saved-data
+    environment:
+      - NODE_ENV=development
+    command: >
+      firebase emulators:start 
+      --project demo-project 
+      --import=/app/saved-data/exp
+      --export-on-exit=/app/saved-data/exp

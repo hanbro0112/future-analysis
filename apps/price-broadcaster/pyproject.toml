@@ -1,0 +1,27 @@
+[project]
+name = "price-broadcaster"
+version = "0.1.0"
+description = "報價廣播服務 - WebSocket 即時報價伺服器"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "python-dotenv>=1.2.2",
+    "pubsub",
+    "firestore-writer",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "websockets>=13.0",
+    "firebase-admin>=6.5.0",
+]
+
+[tool.uv.scripts]
+start = "python main.py"
+
+[tool.uv.sources]
+pubsub = { workspace = true }
+firestore-writer = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

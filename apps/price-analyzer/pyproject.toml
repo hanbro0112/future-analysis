@@ -1,0 +1,18 @@
+[project]
+name = "price-analyzer"
+version = "0.1.0"
+description = "價格分析服務 - 接收 Pub/Sub 訊息並寫入 Firestore"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "python-dotenv>=1.2.2",
+    "pubsub",
+    "firestore-writer",
+]
+
+[tool.uv.scripts]
+start = "python main.py"
+
+[tool.uv.sources]
+pubsub = { workspace = true }
+firestore-writer = { workspace = true }

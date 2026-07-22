@@ -1,0 +1,12 @@
+// vscode/settings.json 設定文件格式 
+
+rules_version = '2'; 
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 開發環境：允許所有讀寫
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
