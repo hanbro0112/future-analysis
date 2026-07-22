@@ -46,6 +46,7 @@ jobs:
           uv export --package functions --no-dev \
             --no-emit-package firestore-writer \
             --no-header \
+            --no-hashes \
             -o functions/requirements.txt
 
       - name: 打包 firestore-writer wheel 並 vendor 進部署目錄
@@ -76,7 +77,6 @@ jobs:
             --no-allow-unauthenticated \
             --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}" \
             --set-secrets=GEMINI_API_KEY=gemini-api-key:latest \
-            
             --memory=512Mi \
             --timeout=180s \
             --min-instances=0 \
