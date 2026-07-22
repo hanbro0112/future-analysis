@@ -69,7 +69,7 @@ jobs:
           gcloud functions deploy daily-report \
             --gen2 \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --runtime=python313 \
+            --runtime=python314 \
             --region="${{ env.REGION }}" \
             --source=apps/functions \
             --entry-point=daily_report \
@@ -89,7 +89,7 @@ jobs:
       #     gcloud functions deploy chip-report \
       #       --gen2 \
       #       --project="${{ secrets.GCP_PROJECT_ID }}" \
-      #       --runtime=python313 \
+      #       --runtime=python314 \
       #       --region="${{ env.REGION }}" \
       #       --source=apps/functions \
       #       --entry-point=chip_report \
