@@ -6,6 +6,7 @@ members = [
     "libs/pubsub",
     "libs/firestore-writer",
     "price-broadcaster",
+    "functions",
 ]
 
 [tool.uv.sources]
