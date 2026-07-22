@@ -65,8 +65,8 @@ jobs:
             --no-allow-unauthenticated \
             --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}" \
             --set-secrets=GEMINI_API_KEY=gemini-api-key:latest \
-            --memory=128Mi \
-            --timeout=180s \
+            --memory=512Mi \
+            --timeout=300s \
             --min-instances=0 \
             --max-instances=1 \
             --ingress-settings=internal-only
@@ -84,7 +84,7 @@ jobs:
             --trigger-http \
             --no-allow-unauthenticated \
             --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}" \
-            --memory=256Mi \
+            --memory=512Mi \
             --timeout=30s \
             --min-instances=0 \
             --max-instances=1 \
