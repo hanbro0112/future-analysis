@@ -2,6 +2,7 @@
 Price Broadcaster - 報價廣播服務
 透過 WebSocket 提供即時報價，並儲存每秒報價到 Firestore
 """
+import os
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # 添加 apps 目錄到 Python 路徑
@@ -132,12 +133,14 @@ class PriceBroadcaster:
                 await websocket.receive_text()
         
         except WebSocketDisconnect:
-            print(f"🔌 WebSocket 連接斷開")
+            # print(f"🔌 WebSocket 連接斷開")
+            pass
         except Exception as e:
-            print(f"❌ WebSocket 錯誤: {e}")
+            # print(f"❌ WebSocket 錯誤: {e}")
+            pass
         finally:
             self.active_connections.discard(websocket)
-            print(f"📊 目前連接數: {len(self.active_connections)}")
+            # print(f"📊 目前連接數: {len(self.active_connections)}")
     
     async def broadcast_prices(self):
         """每秒廣播最新報價給所有 WebSocket 客戶端"""
@@ -486,16 +489,18 @@ async def shutdown_event():
     await broadcaster.stop_background_tasks()
 
 
-def main():
+def main() -> None:
     """主函數"""
+    # 預設值同步為 Cloud Run 注入的 PORT 預設值（8080），避免本機測試與正式環境行為不一致
+    port = int(os.environ.get("PORT", 8080))
     print("🚀 Price Broadcaster 啟動中...")
-    print("📊 WebSocket 端點: ws://localhost:8001/ws/price")
-    print("🔍 健康檢查: http://localhost:8001/health\n")
-    
+    print(f"📊 WebSocket 端點: ws://localhost:{port}/ws/price")
+    print(f"🔍 健康檢查: http://localhost:{port}/health\n")
+
     uvicorn.run(
         broadcaster.app,
         host="0.0.0.0",
-        port=8001,
+        port=port,
         reload=False,
         log_level="info"
     )

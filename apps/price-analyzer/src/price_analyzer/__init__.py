@@ -2,12 +2,14 @@
 Price Analyzer - 價格分析服務
 接收 Pub/Sub 訊息，計算每分鐘統計資訊並寫入 Firestore
 """
+import os
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # 添加 apps 目錄到 Python 路徑
 
 from datetime import datetime
 from decimal import Decimal
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
 from config import config
@@ -93,10 +95,10 @@ def handle_message(data: dict, analyzer: LongShortAnalyzer, aggregator: MinuteAg
     
     # 驗證數值有效性
     if data.get('close') == 0 or data.get('volume') == 0:
-        print(f"⚠️  跳過無效資料：價格或成交量為 0")
+        # print(f"⚠️  跳過無效資料：價格或成交量為 0")
         return
     
-    print(f"📊 收到 Tick: {data.get('code', 'N/A')} @ {data.get('close', 'N/A')}")
+    # print(f"📊 收到 Tick: {data.get('code', 'N/A')} @ {data.get('close', 'N/A')}")
     
     try:
         # 轉換為 TickData 物件
@@ -163,8 +165,28 @@ def dict_to_tick(data: dict) -> TickData:
     )
 
 
-def main():
+class _HealthCheckHandler(BaseHTTPRequestHandler):
+    """Cloud Run 健康檢查用，固定回應 200"""
+
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+def _start_health_check_server() -> None:
+    """在背景 thread 啟動極簡 HTTP server，讓 Cloud Run 判定服務為 healthy"""
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), _HealthCheckHandler)
+    server.serve_forever()
+
+
+def main() -> None:
     """Price Analyzer 主程式"""
+    threading.Thread(target=_start_health_check_server, daemon=True).start()
+
     # 定時器控制（使用字典來保持可變引用）
     flush_timer_ref = {'timer': None}
     timer_lock = threading.Lock()

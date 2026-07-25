@@ -12,10 +12,11 @@ else:
     print(f"⚠️  配置文件不存在: {env_file}")
 
 config = {
-    "api_key": os.environ["API_KEY"],
-    "secret_key": os.environ["SECRET_KEY"],
-    "ca_cert_path": os.environ["CA_CERT_PATH"],
-    "ca_password": os.environ["CA_PASSWORD"],
+    # 僅 price-listener 需要（Shioaji 憑證），其餘服務不使用
+    "api_key": os.getenv("API_KEY", ""),
+    "secret_key": os.getenv("SECRET_KEY", ""),
+    "ca_cert_path": os.getenv("CA_CERT_PATH", ""),
+    "ca_password": os.getenv("CA_PASSWORD", ""),
 
     # GCP 配置
     "gcp_project_id": os.getenv("GCP_PROJECT_ID", "demo-project"),
