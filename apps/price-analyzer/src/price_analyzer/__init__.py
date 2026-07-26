@@ -3,6 +3,7 @@ Price Analyzer - 價格分析服務
 接收 Pub/Sub 訊息，計算每分鐘統計資訊並寫入 Firestore
 """
 import os
+import signal
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # 添加 apps 目錄到 Python 路徑
@@ -228,6 +229,16 @@ def main() -> None:
             subscription_id=subscription_id,
             topic_id=topic_id
         )
+
+        def _handle_sigterm(signum: int, frame: object) -> None:
+            # Cloud Run 關閉 instance 時送 SIGTERM；subscribe() 內部會吃掉 KeyboardInterrupt 但不會吃 SystemExit，
+            # 所以這裡用 sys.exit(0) 讓它正常往上傳，觸發下面的 finally 做關閉清理
+            print("\n\n🛑 收到 SIGTERM，開始關閉...")
+            print("📦 正在完成剩餘的分鐘資料...")
+            aggregator.flush_all()
+            sys.exit(0)
+
+        signal.signal(signal.SIGTERM, _handle_sigterm)
 
         # 啟動自動 flush 定時器
         with timer_lock:

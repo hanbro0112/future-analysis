@@ -1,4 +1,5 @@
 import os
+import signal
 import sys
 import shioaji as sj
 from shioaji import TickFOPv1
@@ -361,10 +362,24 @@ def _start_health_check_server() -> None:
     server.serve_forever()
 
 
+def _handle_sigterm(signum: int, frame: object) -> None:
+    """Cloud Run 關閉 instance 時送 SIGTERM（不是 KeyboardInterrupt），這裡執行跟 Ctrl+C 一樣的清理流程"""
+    print("\n\n🛑 收到 SIGTERM，開始關閉...")
+    check_usage(api_instance)
+    print("👋 正在關閉連接...")
+    try:
+        api_instance.logout()
+        print("✅ 已安全登出")
+    except Exception:
+        pass
+    sys.exit(0)
+
+
 def main() -> None:
     global api_instance, is_session_active
 
     threading.Thread(target=_start_health_check_server, daemon=True).start()
+    signal.signal(signal.SIGTERM, _handle_sigterm)
 
     init_pubsub()
     
