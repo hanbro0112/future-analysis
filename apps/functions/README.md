@@ -66,9 +66,8 @@ uv run functions-framework --target=chip_report --debug
 > ⚠️ GCP 端的 WIF pool/provider 建立、上述 service account 建立與授權，
 > 都需要你自行在有權限的環境執行（見下方 gcloud 指令），不會由 Claude 自動執行。
 > 部署前也請確認 GCP 專案已啟用 Cloud Functions、Cloud Build、Artifact
-> Registry API，且 Cloud Functions 支援的 Python runtime 版本與
-> `pyproject.toml` 的 `requires-python` 相容（目前設定為 `>=3.14`，若部署
-> 環境的 runtime 版本不到 3.14，需要調降此設定）。
+> Registry API（目前部署使用 `python314` runtime，與
+> `pyproject.toml` 的 `requires-python = ">=3.14"` 相容）。
 
 ## 手動部署（gcloud CLI，備用／除錯用）
 
@@ -81,7 +80,7 @@ cd apps/functions
 
 gcloud functions deploy daily-report \
   --gen2 \
-  --runtime=python313 \
+  --runtime=python314 \
   --region=asia-east1 \
   --source=. \
   --entry-point=daily_report \
@@ -92,7 +91,7 @@ gcloud functions deploy daily-report \
 
 gcloud functions deploy chip-report \
   --gen2 \
-  --runtime=python313 \
+  --runtime=python314 \
   --region=asia-east1 \
   --source=. \
   --entry-point=chip_report \

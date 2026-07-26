@@ -37,7 +37,7 @@ class ChipReportProcessor:
 
         Args:
             project_id: GCP 專案 ID，預設從環境變數讀取
-            bucket_name: Storage bucket 名稱，預設為 {project_id}.appspot.com
+            bucket_name: Storage bucket 名稱，預設為 {project_id}.firebasestorage.app
             save_locally: 是否儲存到本地（用於 test_find_bbox.py 工具）
             save_dir: 本地儲存目錄（當 save_locally=True 時使用）
         """
@@ -59,7 +59,7 @@ class ChipReportProcessor:
                 project_id = os.getenv("GCP_PROJECT_ID", "demo-project")
 
             self.project_id = project_id
-            self.bucket_name = bucket_name or f"{project_id}.appspot.com"
+            self.bucket_name = bucket_name or f"{project_id}.firebasestorage.app"
 
             # 初始化 Storage 客戶端
             if self._is_emulator_mode():
@@ -312,7 +312,7 @@ def process_chip_report(target_date: Optional[datetime] = None, project_id: Opti
     Args:
         target_date: 目標日期，預設為今天
         project_id: GCP 專案 ID，預設從環境變數讀取
-        bucket_name: Storage bucket 名稱，預設為 {project_id}.appspot.com
+        bucket_name: Storage bucket 名稱，預設為 {project_id}.firebasestorage.app
 
     Returns:
         處理是否成功
@@ -338,7 +338,6 @@ def chip_report(request):
     except Exception as e:
         import traceback
         print(f"❌ 處理籌碼快訊時發生錯誤: {e}")
-        print(f"🔍 詳細錯誤:\n{traceback.format_exc()}\n")
         return f"籌碼快訊處理失敗: {e}", 500
 
     if success:

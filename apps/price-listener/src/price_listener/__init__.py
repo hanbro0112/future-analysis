@@ -1,8 +1,10 @@
+import os
 import sys
 import shioaji as sj
 from shioaji import TickFOPv1
 import time
 import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from datetime import datetime
 
@@ -131,7 +133,7 @@ def quote_callback(tick: TickFOPv1):
             data=message_data,
             source="price-listener"
         )
-        print(f"📤 已發布到 Pub/Sub，訊息 ID: {message_id}")
+        # print(f"📤 已發布到 Pub/Sub，訊息 ID: {message_id}")
         
     except Exception as e:
         print(f"❌ 發送訊息到 Pub/Sub 失敗: {e}")
@@ -341,9 +343,29 @@ def check_and_reconnect():
     reconnect()
 
 
+class _HealthCheckHandler(BaseHTTPRequestHandler):
+    """Cloud Run 健康檢查用，固定回應 200"""
+
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+def _start_health_check_server() -> None:
+    """在背景 thread 啟動極簡 HTTP server，讓 Cloud Run 判定服務為 healthy"""
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), _HealthCheckHandler)
+    server.serve_forever()
+
+
 def main() -> None:
     global api_instance, is_session_active
-    
+
+    threading.Thread(target=_start_health_check_server, daemon=True).start()
+
     init_pubsub()
     
     api_instance = get_shioaji_client()

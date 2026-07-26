@@ -1,4 +1,7 @@
 # 只支援 linux base shell (windows 可以用 git bash)
+# windows 安裝 gh cli 發 pr: winget install --id GitHub.cli
+# windows 安裝 gcloud cli: (New-Object Net.WebClient).DownloadFile("https://dl.google.com/dl/cloudsdk/channels/rapid/GoogleCloudSDKInstaller.exe", "$env:Temp\GoogleCloudSDKInstaller.exe") & $env:Temp\GoogleCloudSDKInstaller.exe
+    
 
 ROOT_DIR := justfile_directory()
 

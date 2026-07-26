@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.egg-info/
+*.log
+.env
+.env.*
+!.env.example
+functions/vendor/
+functions/requirements.txt

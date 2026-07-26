@@ -113,7 +113,6 @@ def main():
     except Exception as e:
         import traceback
         print(f"❌ 發生錯誤: {e}")
-        print(f"🔍 詳細錯誤:\n{traceback.format_exc()}")
         sys.exit(1)
 
 

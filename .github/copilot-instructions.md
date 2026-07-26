@@ -41,5 +41,6 @@
 - 每個 worktree 完成後必須清理，避免多餘的分支堆積 -->
 
 ## Skills Guidelines
-- 使用 `skills/_template` 作為新技能的基礎模板，確保每個技能都有清晰的 `SKILL.md` 說明。
+
+- 使用 `.github/skills/_template` 作為新技能的基礎模板，確保每個技能都有清晰的 `SKILL.md` 說明。
 - 提交 commit 時，使用 `auto-commit` skill

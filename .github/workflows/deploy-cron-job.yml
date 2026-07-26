@@ -1,0 +1,91 @@
+name: Deploy Cron Job
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "選擇部署的 function"
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - daily-report
+          - chip-report
+
+# WIF 驗證需要讀取 OIDC ID Token 的權限
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  REGION: asia-east1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: 產生 apps/functions 專用 requirements.txt (排除 workspace 內的 firestore-writer)
+        working-directory: apps
+        run: |
+          uv export --package functions --no-dev \
+            --no-emit-package firestore-writer \
+            --no-header \
+            --no-hashes \
+            -o functions/requirements.txt
+
+      - name: 打包 firestore-writer wheel 並 vendor 進部署目錄
+        working-directory: apps
+        run: |
+          uv build --package firestore-writer --wheel --out-dir functions/vendor
+          echo "./vendor/$(ls functions/vendor)" >> functions/requirements.txt
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: 部署 daily-report
+        if: ${{ inputs.target == 'both' || inputs.target == 'daily-report' }}
+        run: |
+          gcloud functions deploy daily-report \
+            --gen2 \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --runtime=python314 \
+            --region="${{ env.REGION }}" \
+            --source=apps/functions \
+            --entry-point=daily_report \
+            --trigger-http \
+            --no-allow-unauthenticated \
+            --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}" \
+            --set-secrets=GEMINI_API_KEY=gemini-api-key:latest \
+            --memory=512Mi \
+            --timeout=300s \
+            --min-instances=0 \
+            --max-instances=1 \
+            --ingress-settings=internal-only
+
+      - name: 部署 chip-report
+        if: ${{ inputs.target == 'both' || inputs.target == 'chip-report' }}
+        run: |
+          gcloud functions deploy chip-report \
+            --gen2 \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --runtime=python314 \
+            --region="${{ env.REGION }}" \
+            --source=apps/functions \
+            --entry-point=chip_report \
+            --trigger-http \
+            --no-allow-unauthenticated \
+            --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}" \
+            --memory=512Mi \
+            --timeout=30s \
+            --min-instances=0 \
+            --max-instances=1 \
+            --ingress-settings=internal-only
