@@ -16,6 +16,8 @@ FROM python:3.14-slim
 WORKDIR /app
 COPY --from=builder /app /app
 ENV PATH="/app/.venv/bin:$PATH"
+# container 環境沒有 tty，Python stdout 預設 block buffering，print() 會延遲或卡住不送到 Cloud Logging
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8080
 CMD ["python", "-m", "price-analyzer.main"]
