@@ -26,6 +26,6 @@ jobs:
       - name: 部署 Firestore 與 Storage 規則
         run: |
           firebase deploy \
-            --only firestore:rules,storage:rules \
+            --only firestore:rules,storage \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
             --non-interactive
