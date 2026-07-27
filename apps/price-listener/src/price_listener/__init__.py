@@ -96,10 +96,10 @@ def is_trading_hours(check_time: datetime | None = None) -> bool:
 
 def quote_callback(tick: TickFOPv1):
     """處理報價回調，推送到 Pub/Sub"""
-    print(f"Received tick: {tick}")
+    # print(f"Received tick: {tick}")
 
     if tick.simtrade:
-        print("⚠️  試撮交易資料，跳過處理")
+        # print("⚠️  試撮交易資料，跳過處理")
         return
     
     try:
@@ -406,7 +406,6 @@ def main() -> None:
         print(f"\nℹ️  當前為盤後時間，將在交易時段開始時自動監聽報價...")
     
     try:
-        print("📌 按 Ctrl+C 退出程式\n")
         check_counter = 0
         while True:
             time.sleep(1)
@@ -418,7 +417,7 @@ def main() -> None:
                 check_and_reconnect()
                 
     except KeyboardInterrupt:
-        print("\n\n🛑 接收到退出信號...")
+        print("\n\n🛑 收到退出信號...")
         check_usage(api_instance)
         print("👋 正在關閉連接...")
         try:

@@ -105,15 +105,15 @@ def handle_message(data: dict, analyzer: LongShortAnalyzer, aggregator: MinuteAg
         # 轉換為 TickData 物件
         tick = dict_to_tick(data)
         
-        # 執行多空比分析（保留在記憶體中）
-        analysis_result = analyzer.analyze(tick)
+        #  # 執行多空比分析（保留在記憶體中)
+        # analysis_result = analyzer.analyze(tick)
         
-        if analysis_result:
-            # 顯示即時分析結果（包含視窗統計）
-            window_1m = analysis_result.window_1min
-            print(f"   🎯 {analysis_result.signal} | "
-                  f"多:{analysis_result.long_ratio:.1f}% 空:{analysis_result.short_ratio:.1f}% | "
-                  f"買:{window_1m.buy_volume} 賣:{window_1m.sell_volume} ")
+        # if analysis_result:
+        #     # 顯示即時分析結果（包含視窗統計）
+        #     window_1m = analysis_result.window_1min
+        #     print(f"   🎯 {analysis_result.signal} | "
+        #           f"多:{analysis_result.long_ratio:.1f}% 空:{analysis_result.short_ratio:.1f}% | "
+        #           f"買:{window_1m.buy_volume} 賣:{window_1m.sell_volume} ")
         
         # 加入分鐘聚合器
         completed_bar = aggregator.add_tick(tick)
@@ -234,6 +234,11 @@ def main() -> None:
             # Cloud Run 關閉 instance 時送 SIGTERM；subscribe() 內部會吃掉 KeyboardInterrupt 但不會吃 SystemExit，
             # 所以這裡用 sys.exit(0) 讓它正常往上傳，觸發下面的 finally 做關閉清理
             print("\n\n🛑 收到 SIGTERM，開始關閉...")
+            # 先停止背景 auto-flush timer，避免跟這裡的 flush_all() 同時搶著處理 current_bars
+            with timer_lock:
+                if flush_timer_ref.get('timer') is not None:
+                    flush_timer_ref['timer'].cancel()
+                    flush_timer_ref['timer'] = None
             print("📦 正在完成剩餘的分鐘資料...")
             aggregator.flush_all()
             sys.exit(0)

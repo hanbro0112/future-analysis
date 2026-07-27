@@ -494,8 +494,10 @@ def main() -> None:
     # 預設值同步為 Cloud Run 注入的 PORT 預設值（8080），避免本機測試與正式環境行為不一致
     port = int(os.environ.get("PORT", 8080))
     print("🚀 Price Broadcaster 啟動中...")
-    print(f"📊 WebSocket 端點: ws://localhost:{port}/ws/price")
-    print(f"🔍 健康檢查: http://localhost:{port}/health\n")
+
+    if config["is_local"]:
+        print(f"📊 WebSocket 端點: ws://localhost:{port}/ws/price")
+        print(f"🔍 健康檢查: http://localhost:{port}/health\n")
 
     uvicorn.run(
         broadcaster.app,
