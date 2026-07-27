@@ -12,6 +12,7 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "websockets>=13.0",
     "firebase-admin>=6.5.0",
+    "tzdata>=2025.1",
 ]
 
 [tool.uv.scripts]

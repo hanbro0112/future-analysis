@@ -8,10 +8,11 @@ root_dir = Path(__file__).resolve().parents[1]
 env_file = root_dir / '.env'
 if env_file.exists():
     load_dotenv(env_file)
-else:
-    print(f"⚠️  配置文件不存在: {env_file}")
 
 config = {
+    # .env 檔案代表是本機開發環境
+    "is_local": env_file.exists(),
+
     # 僅 price-listener 需要（Shioaji 憑證），其餘服務不使用
     "api_key": os.getenv("API_KEY", ""),
     "secret_key": os.getenv("SECRET_KEY", ""),

@@ -12,6 +12,11 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, Dict, Set
 from collections import defaultdict
+from zoneinfo import ZoneInfo
+
+# 台指期交易時段以台北時間為準；容器內部時鐘預設為 UTC，
+# 所有涉及交易時段判斷與 Firestore 文件路徑命名的時間都需以此時區為準。
+TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -124,7 +129,7 @@ class PriceBroadcaster:
                 await websocket.send_json({
                     "type": "price",
                     "data": self.latest_prices,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now(TAIPEI_TZ).isoformat()
                 })
             
             # 保持連接
@@ -140,7 +145,7 @@ class PriceBroadcaster:
             pass
         finally:
             self.active_connections.discard(websocket)
-            # print(f"📊 目前連接數: {len(self.active_connections)}")
+            print(f"📊 連接已移除，目前連接數: {len(self.active_connections)}")
     
     async def broadcast_prices(self):
         """每秒廣播最新報價給所有 WebSocket 客戶端"""
@@ -150,7 +155,7 @@ class PriceBroadcaster:
                 
                 # 儲存當前秒的報價（用於每分鐘寫入）- 不論是否有連接都要儲存
                 if self.latest_prices:
-                    now = datetime.now()
+                    now = datetime.now(TAIPEI_TZ)
                     current_second = now.second
                     minute_timestamp = now.replace(second=0, microsecond=0)
                     
@@ -174,7 +179,7 @@ class PriceBroadcaster:
                 message = {
                     "type": "price",
                     "data": self.latest_prices,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now(TAIPEI_TZ).isoformat()
                 }
                 
                 # 廣播給所有連接的客戶端
@@ -198,12 +203,12 @@ class PriceBroadcaster:
         while True:
             try:
                 # 等待到下一分鐘開始
-                now = datetime.now()
+                now = datetime.now(TAIPEI_TZ)
                 seconds_to_wait = 60 - now.second
                 await asyncio.sleep(seconds_to_wait)
-                
+
                 # 睡眠後重新取得當前時間
-                current_time = datetime.now()
+                current_time = datetime.now(TAIPEI_TZ)
                 current_minute = current_time.replace(second=0, microsecond=0)
                 
                 # 計算上一分鐘的時間戳
@@ -494,8 +499,10 @@ def main() -> None:
     # 預設值同步為 Cloud Run 注入的 PORT 預設值（8080），避免本機測試與正式環境行為不一致
     port = int(os.environ.get("PORT", 8080))
     print("🚀 Price Broadcaster 啟動中...")
-    print(f"📊 WebSocket 端點: ws://localhost:{port}/ws/price")
-    print(f"🔍 健康檢查: http://localhost:{port}/health\n")
+
+    if config["is_local"]:
+        print(f"📊 WebSocket 端點: ws://localhost:{port}/ws/price")
+        print(f"🔍 健康檢查: http://localhost:{port}/health\n")
 
     uvicorn.run(
         broadcaster.app,

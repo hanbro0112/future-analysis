@@ -144,8 +144,8 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
   const changeColor = isPositive ? 'text-red-600' : 'text-green-600';
   const bgColor = isPositive ? 'bg-red-50' : 'bg-green-50';
   
-  // 無資料時顯示空框架
-  if (!quote) {
+  // 完全沒有資料（歷史資料與即時資料都沒有）時才顯示空框架
+  if (!quote && !realtimePrice) {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
         {/* 標題 */}
@@ -209,10 +209,10 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
-            {quote.name}
+            {quote?.name ?? '台指期貨'}
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {quote.symbol}
+            {quote?.symbol ?? realtimePrice?.code ?? 'MXF'}
           </p>
         </div>
         <div className={`px-3 py-1 rounded-full ${bgColor}`}>
