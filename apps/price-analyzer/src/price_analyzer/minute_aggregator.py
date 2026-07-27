@@ -7,8 +7,22 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, Dict, Callable, List
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 
 from .strategy import TickData
+
+TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+
+
+def now_taipei() -> datetime:
+    """
+    取得目前台北時間（naive datetime，不帶 tzinfo）。
+
+    tick.datetime 來自 Shioaji，本身是不帶 tzinfo 的台北當地時間；
+    容器內部時鐘預設為 UTC，若直接用 datetime.now() 會與 tick 時間差 8 小時，
+    因此統一用這個函數取得「數值正確但仍為 naive」的台北時間，才能跟 tick 時間戳直接比較。
+    """
+    return datetime.now(TAIPEI_TZ).replace(tzinfo=None)
 
 
 @dataclass
@@ -256,8 +270,8 @@ class MinuteAggregator:
         """
         if self.last_minute is None or not self.current_bars:
             return False
-        
-        now = datetime.now()
+
+        now = now_taipei()
         time_diff = (now - self.last_minute).total_seconds() / 60.0
         return time_diff >= delay_minutes
     
@@ -273,8 +287,8 @@ class MinuteAggregator:
         """
         if not self.should_flush(delay_minutes):
             return []
-        
-        now = datetime.now()
+
+        now = now_taipei()
         completed_bars = []
         
         for key in list(self.current_bars.keys()):

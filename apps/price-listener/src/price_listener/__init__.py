@@ -8,10 +8,23 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # 添加 apps 目錄到 Python 路徑
 from config import config
 from pubsub import PubSubPublisher
+
+TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+
+
+def now_taipei() -> datetime:
+    """
+    取得目前台北時間（naive datetime，不帶 tzinfo）。
+
+    容器內部時鐘預設為 UTC，交易時段判斷與重連時間紀錄都需以台北時間為準，
+    否則斷線時可能誤判為「非交易時段」而不重連。
+    """
+    return datetime.now(TAIPEI_TZ).replace(tzinfo=None)
 
 # 初始化 Pub/Sub Publisher
 pubsub_publisher: PubSubPublisher | None = None
@@ -58,7 +71,7 @@ def is_trading_hours(check_time: datetime | None = None) -> bool:
         True 如果在交易時段內
     """
     if check_time is None:
-        check_time = datetime.now()
+        check_time = now_taipei()
     
     weekday = check_time.weekday()  # 0=週一, 6=週日
     hour = check_time.hour
@@ -159,7 +172,7 @@ def on_session_down(resp_code: int, event_code: int, info: str, event: str):
             return
         
         is_session_active = False
-        timestamp = datetime.now()
+        timestamp = now_taipei()
         
         print(f"\n{'='*60}")
         print(f"⚠️ [{timestamp.strftime('%Y-%m-%d %H:%M:%S')}] 會話斷線事件觸發")
@@ -274,7 +287,7 @@ def reconnect():
             print(f"✅ 第 {attempt} 次重連成功！")
             is_reconnecting = False
             is_session_active = True
-            last_reconnect_time = datetime.now()
+            last_reconnect_time = now_taipei()
             return True
             
         except Exception as e:
@@ -329,7 +342,7 @@ def check_and_reconnect():
         return
     
     # 檢查是否在交易時段內
-    now = datetime.now()
+    now = now_taipei()
     if not is_trading_hours(now):
         return
     
@@ -399,7 +412,7 @@ def main() -> None:
     subscribe_contracts(api_instance)
     
     # 顯示交易時段資訊
-    now = datetime.now()
+    now = now_taipei()
     if is_trading_hours(now):
         print(f"\n✅ 當前為交易時段，開始監聽報價...")
     else:

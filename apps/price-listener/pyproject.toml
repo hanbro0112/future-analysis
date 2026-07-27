@@ -8,6 +8,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "shioaji>=1.3.3",
     "pubsub",
+    "tzdata>=2025.1",
 ]
 
 [tool.uv.scripts]

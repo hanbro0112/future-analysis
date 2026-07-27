@@ -8,6 +8,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "pubsub",
     "firestore-writer",
+    "tzdata>=2025.1",
 ]
 
 [tool.uv.scripts]

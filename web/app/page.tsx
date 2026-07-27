@@ -5,7 +5,7 @@
  * 顯示台指期分鐘級走勢圖與報價資訊
  */
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import QuoteCard from './components/QuoteCard';
 import MinuteChart from './components/MinuteChart';
 import DailyAnalysisCard from './components/DailyAnalysisCard';
@@ -195,19 +195,33 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const [dailyReport, setDailyReport] = useState<DailyReport | null>(null); // 每日分析報告
   const [isDailyReportLoading, setIsDailyReportLoading] = useState(true); // 每日分析載入狀態
 
-  // 取得 Firebase ID Token，供 WebSocket 連線驗證使用
-  const [wsToken, setWsToken] = useState<string | null>(null);
+  // 是否已登入，用來決定是否開始建立 WebSocket 連線
+  const [isSignedIn, setIsSignedIn] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
-      setWsToken(firebaseUser ? await firebaseUser.getIdToken() : null);
+    const unsubscribe = onIdTokenChanged(auth, (firebaseUser) => {
+      setIsSignedIn(!!firebaseUser);
     });
     return unsubscribe;
   }, []);
 
-  // WebSocket 即時報價連接（未取得 Token 前不建立連線）
+  // 每次連線（含重連）都即時取得最新 Firebase ID Token，避免使用已過期的 Token 重連；
+  // forceRefresh 為 true 時（上次連線因驗證失敗而關閉）強制向 Firebase 換發新 Token
+  const getWsUrl = useCallback(async (forceRefresh: boolean): Promise<string | null> => {
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser) return null;
+
+    try {
+      const token = await firebaseUser.getIdToken(forceRefresh);
+      return `${WS_URL}?token=${encodeURIComponent(token)}`;
+    } catch (err) {
+      return null;
+    }
+  }, []);
+
+  // WebSocket 即時報價連接（尚未登入前不建立連線）
   const { prices: realtimePrices, isConnected: wsConnected } = useWebSocket(
-    wsToken ? `${WS_URL}?token=${encodeURIComponent(wsToken)}` : null
+    isSignedIn ? getWsUrl : null
   );
 
   // 使用 useMemo 提取即時報價，避免不必要的重新渲染

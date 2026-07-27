@@ -17,7 +17,7 @@ from config import config
 from pubsub import PubSubSubscriber
 from firestore_writer import FirestoreWriter
 from .strategy import LongShortAnalyzer, TickData
-from .minute_aggregator import MinuteAggregator, MinuteBar
+from .minute_aggregator import MinuteAggregator, MinuteBar, now_taipei
 
 
 # ========== 獨立回調函數 ==========
@@ -133,7 +133,7 @@ def dict_to_tick(data: dict) -> TickData:
     if isinstance(dt, str):
         dt = datetime.fromisoformat(dt)
     elif not isinstance(dt, datetime):
-        dt = datetime.now()
+        dt = now_taipei()
     
     # 處理 Decimal 欄位
     def to_decimal(value, default='0'):
