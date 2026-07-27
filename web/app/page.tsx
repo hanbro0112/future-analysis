@@ -17,6 +17,7 @@ import { isInTradingHours } from './lib/tradingHours';
 import { useAuth } from './lib/AuthContext';
 import { auth } from './lib/firebase';
 import { onIdTokenChanged } from 'firebase/auth';
+import { resolveWsUrl } from './lib/wsUrl';
 
 import { 
   getTodayMinuteData, 
@@ -32,7 +33,8 @@ import type { TaifexQuote } from './types/futures';
 import type { MinuteBar, MinuteChartPoint, AnalysisResult } from './types/minuteData';
 
 // Price Broadcaster WebSocket 網址（本地開發預設連 localhost，正式環境由環境變數指定）
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8001/ws/price';
+// resolveWsUrl 會自動修正 http(s) 開頭、缺少 /ws/price 路徑等常見設定失誤
+const WS_URL = resolveWsUrl(process.env.NEXT_PUBLIC_WS_URL);
 
 /**
  * 根據當前時間判斷預設盤面類型（包含延後 3 分鐘以更新最後一筆資料）

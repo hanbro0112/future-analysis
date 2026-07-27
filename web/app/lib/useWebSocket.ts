@@ -87,7 +87,7 @@ export function useWebSocket(
 
         ws.onmessage = (event) => {
           if (!isMountedRef.current) return;
-          
+
           try {
             const message = JSON.parse(event.data);
             

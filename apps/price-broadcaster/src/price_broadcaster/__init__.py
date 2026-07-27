@@ -140,7 +140,7 @@ class PriceBroadcaster:
             pass
         finally:
             self.active_connections.discard(websocket)
-            # print(f"📊 目前連接數: {len(self.active_connections)}")
+            print(f"📊 連接已移除，目前連接數: {len(self.active_connections)}")
     
     async def broadcast_prices(self):
         """每秒廣播最新報價給所有 WebSocket 客戶端"""
