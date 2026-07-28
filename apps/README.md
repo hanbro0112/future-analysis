@@ -1,6 +1,6 @@
 # Apps Workspace
 
-這是一個 uv workspace，包含三個獨立的應用程式。
+這是一個 uv workspace，包含三個常駐的 Cloud Run 服務、一組定時任務 Cloud Functions，以及供彼此共用的程式庫。
 
 ## 專案結構
 
@@ -23,25 +23,33 @@ apps/
 │           └── firestore_writer/
 │               ├── __init__.py
 │               └── client.py
-├── price-listener/          # 價格監聽服務
+├── price-listener/          # 價格監聽服務（Cloud Run）
 │   ├── main.py             # 啟動入口
 │   ├── pyproject.toml      # Package 配置
 │   └── src/
 │       └── price_listener/
 │           └── __init__.py
-├── price-analyzer/          # 價格分析服務
+├── price-analyzer/          # 價格分析服務（Cloud Run）
 │   ├── main.py             # 啟動入口
 │   ├── pyproject.toml      # Package 配置
 │   └── src/
 │       └── price_analyzer/
-│           └── __init__.py
-└── price-broadcaster/       # 報價廣播服務
-    ├── main.py             # 啟動入口
-    ├── pyproject.toml      # Package 配置
-    ├── test_ws_client.py   # WebSocket 測試客戶端
-    └── src/
-        └── price_broadcaster/
-            └── __init__.py
+│           ├── __init__.py
+│           ├── minute_aggregator.py
+│           └── strategy.py
+├── price-broadcaster/       # 報價廣播服務（Cloud Run）
+│   ├── main.py             # 啟動入口
+│   ├── pyproject.toml      # Package 配置
+│   ├── test_ws_client.py   # WebSocket 測試客戶端
+│   └── src/
+│       └── price_broadcaster/
+│           ├── __init__.py
+│           └── auth.py
+└── functions/                # 定時任務（Cloud Functions 2nd gen）
+    ├── main.py               # 進入點，匯出 daily_report / chip_report
+    ├── daily_report.py       # 每日 AI 市場分析（Gemini）
+    ├── chip_report.py        # 籌碼快訊圖表擷取
+    └── pyproject.toml        # Package 配置
 ```
 
 ## 安裝依賴
@@ -177,3 +185,9 @@ uv add package-name
 - 每分鐘儲存完整 60 筆報價到 Firestore
 - 支援前向填充和跨分鐘連續性
 - 詳見：[price-broadcaster/README.md](price-broadcaster/README.md)
+
+### Functions（定時任務）
+- `daily_report`：每日以 Gemini API 分析台股/美股，寫入 Firestore `daily_reports/{YYYYMMDD}`
+- `chip_report`：每交易日抓取台指籌碼快訊 PDF，裁切圖表上傳 Cloud Storage
+- 由 Cloud Scheduler 觸發 Cloud Functions (2nd gen)，非常駐服務
+- 詳見：[functions/README.md](functions/README.md)

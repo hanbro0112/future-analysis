@@ -11,6 +11,15 @@
 
 兩個 function 都是 HTTP-triggered，`main.py` 匯入兩者供 `gcloud functions deploy --entry-point` 使用。
 
+## 元件說明
+
+| 檔案 | 功用 |
+| --- | --- |
+| `main.py` | Cloud Functions 進入點，匯出 `daily_report` / `chip_report` 供部署指定 entry-point |
+| `daily_report.py` | 呼叫 Gemini API 分析台股/美股市場，寫入 Firestore `daily_reports/{YYYYMMDD}`，內含 `is_trading_day` 交易日判斷 |
+| `chip_report.py` | 抓取台指籌碼快訊 PDF、裁切散戶多空比圖表，上傳 Cloud Storage `chip-reports/{YYYYMMDD}/` |
+| `README_CHIP_REPORT.md` | 籌碼快訊 PDF 裁切座標調整說明 |
+
 ## 環境變數
 
 ```bash

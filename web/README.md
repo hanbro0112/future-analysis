@@ -64,29 +64,44 @@ pnpm dev
 
 ```
 web/
-├── app/                      # Next.js App Router 頁面
-│   ├── (routes)/            # 路由群組
-│   ├── api/                 # API Routes（可選）
+├── app/
+│   ├── components/          # React 元件
+│   ├── lib/                 # Firebase 存取、WebSocket、工具函式
+│   ├── types/                # TypeScript 型別定義
 │   ├── layout.tsx           # 根佈局
 │   ├── page.tsx             # 首頁
 │   └── globals.css          # 全域樣式
-├── components/              # React 元件
-│   ├── ui/                  # 基礎 UI 元件
-│   └── features/            # 功能性元件
-├── lib/                     # 工具函式和共用邏輯
-│   ├── firebase/            # Firebase 相關
-│   │   ├── config.ts        # Firebase 初始化配置
-│   │   ├── firestore.ts     # Firestore CRUD 工具函式
-│   │   └── collections.ts   # Collection 名稱定義
-│   ├── hooks/               # 自訂 React Hooks
-│   └── utils/               # 通用工具函式
-├── types/                   # TypeScript 型別定義
-│   ├── user.ts              # 使用者相關型別
-│   └── index.ts             # 匯出所有型別
 ├── public/                  # 靜態資源
 ├── AGENTS.md                # 開發規範文件
+├── FEATURES.md              # 功能特色與資料格式說明
 └── README.md                # 本文件
 ```
+
+## 🧩 元件說明（app/components/）
+
+| 元件 | 功用 |
+| --- | --- |
+| `QuoteCard.tsx` | 台指期報價卡片，整合歷史/即時（WebSocket）報價與最新多空分析，顯示漲跌、OHLC、成交量 |
+| `RealtimeQuoteCard.tsx` | 純即時報價卡片，顯示 WebSocket 每秒推播的成交價、加權指數、每秒成交量 |
+| `FuturesChart.tsx` | 台指期即時走勢折線圖（每 3 秒更新，最近 60 個價格點），以開盤價為參考線 |
+| `MinuteChart.tsx` | 分鐘級組合圖（均價折線 + 高低價虛線 + 成交量柱狀），支援日盤/夜盤資料切換與最新分析結果標色 |
+| `DailyAnalysisCard.tsx` | 顯示 Cloud Functions `daily-report` 產生的 Gemini AI 每日市場分析（Markdown 渲染） |
+| `ChipReportCard.tsx` | 顯示 Cloud Functions `chip-report` 產生、存於 Cloud Storage 的小台/微台散戶多空比圖表 |
+| `LoginScreen.tsx` | 未登入時顯示的登入畫面，提供 Google 登入按鈕 |
+| `ThemeProvider.tsx` | 包裝 `next-themes`，提供全站深色/淺色模式 context |
+| `ThemeToggle.tsx` | 深色/淺色模式切換按鈕 |
+
+## 🔧 工具與資料層說明（app/lib/）
+
+| 檔案 | 功用 |
+| --- | --- |
+| `firebase.ts` | Firebase App 初始化，匯出 `db` / `storage` / `auth`，支援連線本機 Emulator |
+| `firestoreApi.ts` | Firestore 資料存取層：讀取分鐘級期貨資料（`MinuteBar`）與每日 AI 分析報告 |
+| `AuthContext.tsx` | 以 React Context 管理 Firebase Auth 登入狀態，提供 `signInWithGoogle` / `signOut` |
+| `useWebSocket.ts` | 連線 `price-broadcaster` WebSocket 的 Hook，回傳即時報價、連線狀態、錯誤訊息，並依交易時段自動連線/斷線 |
+| `wsUrl.ts` | 將環境變數提供的 WebSocket 網址正規化（http→ws 轉換、補上 `/ws/price` 路徑） |
+| `tradingHours.ts` | 判斷目前是否為交易時段（日盤/夜盤） |
+| `mockData.ts` | 開發期間用的模擬台指期資料產生器 |
 
 ---
 

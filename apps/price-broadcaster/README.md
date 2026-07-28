@@ -179,8 +179,18 @@ price-broadcaster/
 ├── test_ws_client.py          # WebSocket 測試客戶端
 └── src/
     └── price_broadcaster/
-        └── __init__.py        # FastAPI 應用和 WebSocket 邏輯
+        ├── __init__.py        # FastAPI 應用和 WebSocket 邏輯
+        └── auth.py            # Firebase ID Token 驗證
 ```
+
+## 元件說明
+
+| 檔案 | 功用 |
+| --- | --- |
+| `main.py` | 服務啟動入口，啟動 FastAPI/uvicorn |
+| `src/price_broadcaster/__init__.py` | FastAPI 應用主體：Pub/Sub 訂閱、每秒價格聚合與 WebSocket 廣播、缺秒前向填充、跨分鐘/跨日處理、每分鐘寫入 Firestore、`/health` 健康檢查 |
+| `src/price_broadcaster/auth.py` | 驗證前端 WebSocket 連線帶上的 Firebase ID Token（`firebase_admin.auth`），拒絕未登入連線 |
+| `test_ws_client.py` | 本地測試用 WebSocket 客戶端，接收並印出報價訊息 |
 
 ## 時間處理
 
