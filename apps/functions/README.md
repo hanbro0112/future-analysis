@@ -136,7 +136,9 @@ gcloud scheduler jobs create http daily-report-job \
   --time-zone="Asia/Taipei" \
   --uri="$DAILY_REPORT_URL" \
   --http-method=POST \
-  --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com"
+  --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com" \
+  --max-retry-attempts=3 \
+  --min-backoff=300s
 
 gcloud scheduler jobs create http chip-report-job \
   --location=asia-east1 \
@@ -144,11 +146,17 @@ gcloud scheduler jobs create http chip-report-job \
   --time-zone="Asia/Taipei" \
   --uri="$CHIP_REPORT_URL" \
   --http-method=POST \
-  --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com"
+  --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com" \
+  --max-retry-attempts=3 \
+  --min-backoff=600s
 ```
 
 Cron 排程已用 `1-5`（週一至週五）排除週末，`daily_report` 內部仍保留
 `is_trading_day` 判斷作為第二層保護；國定假日目前沒有排除，與拆分前行為一致。
+
+`daily_report` 呼叫 Gemini API 只執行一次（不再內建指數退避重試），失敗時回傳
+HTTP 500，改由上方 `daily-report-job` 的 `--max-retry-attempts` / `--min-backoff`
+接手重試。
 
 ## 相關文件
 

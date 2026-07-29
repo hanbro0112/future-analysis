@@ -41,7 +41,7 @@ export async function getMinuteData(
 ): Promise<MinuteBar[]> {
   try {
     const collectionPath = `market/${symbol}/${date}`;
-    console.log(`📊 讀取 Firestore 路徑: ${collectionPath}`, marketType ? `盤別: ${marketType}` : '全部');
+    // console.log(`📊 讀取 Firestore 路徑: ${collectionPath}`, marketType ? `盤別: ${marketType}` : '全部');
 
     // 集合 ID 為日期（每天不同），不使用 where + orderBy 的複合查詢
     // （否則每天都要重新建立 composite index），盤別改在讀取後於前端過濾
@@ -96,7 +96,7 @@ export async function getMinuteData(
       });
     }
     
-    console.log(`✅ 讀取成功: ${data.length} 筆資料`);
+    // console.log(`✅ 讀取成功: ${data.length} 筆資料`);
     return data;
   } catch (error) {
     console.error('❌ 讀取分鐘資料失敗:', error);

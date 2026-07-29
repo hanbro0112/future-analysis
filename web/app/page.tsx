@@ -289,7 +289,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
     } catch (error) {
       console.error('❌ 計算參考價失敗:', error);
     }
-    
+
     // 後備方案：使用當前盤別第一筆開盤價
     if (currentData.length > 0) {
       console.log('⚠️ 使用後備方案：當前盤別開盤價:', currentData[0].open);
@@ -484,39 +484,23 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
     loadMinuteData();
   }, []);
 
-  // 讀取每日分析報告
-  useEffect(() => {
-    async function loadDailyReport() {
-      try {
-        setIsDailyReportLoading(true);
-        const report = await getTodayDailyReport();
-        setDailyReport(report);
-        console.log('📊 載入每日分析:', report ? report.date : '無資料');
-      } catch (error) {
-        console.error('❌ 載入每日分析失敗:', error);
-        setDailyReport(null);
-      } finally {
-        setIsDailyReportLoading(false);
-      }
+  // 讀取每日分析報告（僅首次載入，之後由使用者點擊更新圖示手動觸發）
+  const loadDailyReport = useCallback(async () => {
+    try {
+      setIsDailyReportLoading(true);
+      const report = await getTodayDailyReport();
+      setDailyReport(report);
+    } catch (error) {
+      console.error('❌ 載入每日分析失敗:', error);
+      setDailyReport(null);
+    } finally {
+      setIsDailyReportLoading(false);
     }
-    
-    loadDailyReport();
-    
-    // 每分鐘檢查一次，在 08:01 時自動更新
-    const interval = setInterval(() => {
-      const now = new Date();
-      const hour = now.getHours();
-      const minute = now.getMinutes();
-      
-      // 在 08:01 時重新載入
-      if (hour === 8 && minute === 1) {
-        console.log('🔄 08:01 自動更新每日分析');
-        loadDailyReport();
-      }
-    }, 60000); // 每分鐘檢查一次
-    
-    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    loadDailyReport();
+  }, [loadDailyReport]);
 
   // 使用 ref 追蹤定時器是否已啟動
   const updateTimerRef = useRef<{ timeout?: NodeJS.Timeout; interval?: NodeJS.Timeout }>({});
@@ -570,7 +554,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
           ? await getTodayDaySession('MXF')
           : await getTodayNightSession('MXF');
         
-        console.log(`🔄 更新 ${currentSessionType === 'regular' ? '日盤' : '夜盤'} 資料: ${sessionData.length} 筆`);
+        // console.log(`🔄 更新 ${currentSessionType === 'regular' ? '日盤' : '夜盤'} 資料: ${sessionData.length} 筆`);
 
         // 合併資料：保留其他時段的資料，更新當前時段的資料
         const otherSessionData = allMinuteData.filter(bar => bar.market_type !== currentSessionType);
@@ -653,7 +637,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
             setLatestTime('');
           }
           
-          console.log('✅ 資料已更新:', latest.time);
+          // console.log('✅ 資料已更新:', latest.time);
         }
       } catch (error) {
         console.error('更新資料失敗:', error);
@@ -872,9 +856,10 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
             <div className="my-8 border-t border-gray-200"></div>
 
             {/* 每日分析報告 */}
-            <DailyAnalysisCard 
+            <DailyAnalysisCard
               report={dailyReport}
               isLoading={isDailyReportLoading}
+              onRefresh={loadDailyReport}
             />
             
             {/* 分隔線 */}

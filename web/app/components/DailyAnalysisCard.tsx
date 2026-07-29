@@ -14,6 +14,8 @@ interface DailyAnalysisCardProps {
   report: DailyReport | null;
   /** 是否正在載入 */
   isLoading?: boolean;
+  /** 手動更新回調 */
+  onRefresh?: () => void;
 }
 
 /**
@@ -29,7 +31,7 @@ function formatDateDisplay(dateStr: string): string {
   return `${year}/${month}/${day}`;
 }
 
-function DailyAnalysisCard({ report, isLoading = false }: DailyAnalysisCardProps) {
+function DailyAnalysisCard({ report, isLoading = false, onRefresh }: DailyAnalysisCardProps) {
   // 展開/收回狀態
   const [isExpanded, setIsExpanded] = useState(false);
   
@@ -55,6 +57,25 @@ function DailyAnalysisCard({ report, isLoading = false }: DailyAnalysisCardProps
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">AI 每日市場分析</h2>
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={isLoading}
+              title="手動更新"
+              aria-label="手動更新每日分析"
+              className="p-1 rounded-full text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg
+                className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          )}
         </div>
         {report && (
           <span className="text-sm text-gray-500 dark:text-gray-400">

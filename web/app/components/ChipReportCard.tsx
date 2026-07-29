@@ -5,7 +5,7 @@
  * 顯示小台和微台散戶多空比圖表
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { storage } from '../lib/firebase';
 import { ref, getDownloadURL } from 'firebase/storage';
 
@@ -80,70 +80,71 @@ export default function ChipReportCard({ className = '' }: ChipReportCardProps) 
   const [reportDate, setReportDate] = useState<Date>(new Date());
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadChipReportImages() {
-      try {
-        setIsLoading(true);
-        setError(null);
-        
-        // 獲取報告日期
-        const date = getChipReportDate();
-        setReportDate(date);
-        const dateStr = formatDateToYYYYMMDD(date);
-        
-        console.log('📊 載入籌碼報告:', dateStr);
-        
-        // 構建 Storage 路徑
-        const mtxPath = `chip-reports/${dateStr}/${dateStr}_MTX_futures_ratio.png`;
-        const tmfPath = `chip-reports/${dateStr}/${dateStr}_TMF_futures_ratio.png`;
-        
-        // 獲取下載 URL
-        const mtxRef = ref(storage, mtxPath);
-        const tmfRef = ref(storage, tmfPath);
-        
-        const [mtxUrl, tmfUrl] = await Promise.all([
-          getDownloadURL(mtxRef),
-          getDownloadURL(tmfRef)
-        ]);
-        
-        setMtxImageUrl(mtxUrl);
-        setTmfImageUrl(tmfUrl);
-        
-        console.log('✅ 籌碼報告圖片載入成功');
-      } catch (err) {
-        console.error('❌ 載入籌碼報告失敗:', err);
-        setError('載入籌碼報告失敗');
-        setMtxImageUrl(null);
-        setTmfImageUrl(null);
-      } finally {
-        setIsLoading(false);
-      }
+  // 載入籌碼報告圖片（僅首次載入，之後由使用者點擊更新圖示手動觸發）
+  const loadChipReportImages = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // 獲取報告日期
+      const date = getChipReportDate();
+      setReportDate(date);
+      const dateStr = formatDateToYYYYMMDD(date);
+
+      // 構建 Storage 路徑
+      const mtxPath = `chip-reports/${dateStr}/${dateStr}_MTX_futures_ratio.png`;
+      const tmfPath = `chip-reports/${dateStr}/${dateStr}_TMF_futures_ratio.png`;
+
+      // 獲取下載 URL
+      const mtxRef = ref(storage, mtxPath);
+      const tmfRef = ref(storage, tmfPath);
+
+      const [mtxUrl, tmfUrl] = await Promise.all([
+        getDownloadURL(mtxRef),
+        getDownloadURL(tmfRef)
+      ]);
+
+      setMtxImageUrl(mtxUrl);
+      setTmfImageUrl(tmfUrl);
+    } catch (err) {
+      console.error('❌ 載入籌碼報告失敗:', err);
+      setError('載入籌碼報告失敗');
+      setMtxImageUrl(null);
+      setTmfImageUrl(null);
+    } finally {
+      setIsLoading(false);
     }
-    
-    loadChipReportImages();
-    
-    // 每分鐘檢查一次，在 15:22 時自動更新
-    const interval = setInterval(() => {
-      const now = new Date();
-      const hour = now.getHours();
-      const minute = now.getMinutes();
-      
-      // 在 15:22 時重新載入
-      if (hour === 15 && minute === 22) {
-        console.log('🔄 15:22 自動更新籌碼報告');
-        loadChipReportImages();
-      }
-    }, 60000); // 每分鐘檢查一次
-    
-    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    loadChipReportImages();
+  }, [loadChipReportImages]);
 
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 ${className}`}>
       <div className="mb-4">
-        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
-          📊 散戶多空比 ({formatDateForDisplay(reportDate)})
-        </h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
+            📊 散戶多空比 ({formatDateForDisplay(reportDate)})
+          </h2>
+          <button
+            type="button"
+            onClick={loadChipReportImages}
+            disabled={isLoading}
+            title="手動更新"
+            aria-label="手動更新籌碼報告"
+            className="p-1 rounded-full text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg
+              className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
           資料來源：永豐期貨籌碼快訊（每交易日 15:21 更新）
         </p>
