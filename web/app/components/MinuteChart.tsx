@@ -347,7 +347,7 @@ const MinuteChart = ({ data, dayData, nightData, title = '分鐘級走勢', mark
       });
     });
 
-    console.log(`[計算] 原始線段: ${allSegments.length}, 合併後: ${finalSegments.length}`);
+    // console.log(`[計算] 原始線段: ${allSegments.length}, 合併後: ${finalSegments.length}`);
     return { chartData: chart, lineSegments: finalSegments };
   }, []);
 
@@ -381,7 +381,7 @@ const MinuteChart = ({ data, dayData, nightData, title = '分鐘級走勢', mark
       normalizedDayData.length - prev.normalizedData.length <= 2;
     
     if (canIncremental) {
-      console.log('[日盤] 增量更新，新增', normalizedDayData.length - prev!.normalizedData.length, '筆');
+      // console.log('[日盤] 增量更新，新增', normalizedDayData.length - prev!.normalizedData.length, '筆');
       // 複製前一次的結果
       const chart = [...prev!.chartData];
       const segments = [...prev!.lineSegments];
@@ -429,7 +429,7 @@ const MinuteChart = ({ data, dayData, nightData, title = '分鐘級走勢', mark
     }
     
     // 完整計算
-    console.log('[日盤] 完整計算，共', normalizedDayData.length, '筆資料');
+    // console.log('[日盤] 完整計算，共', normalizedDayData.length, '筆資料');
     const result = computeChartDataAndSegments(normalizedDayData, dayTimeRange, dayAvgVolume);
     dayChartRef.current = {
       normalizedData: normalizedDayData,
@@ -456,7 +456,7 @@ const MinuteChart = ({ data, dayData, nightData, title = '分鐘級走勢', mark
       normalizedNightData.length - prev.normalizedData.length <= 2;
     
     if (canIncremental) {
-      console.log('[夜盤] 增量更新，新增', normalizedNightData.length - prev!.normalizedData.length, '筆');
+      // console.log('[夜盤] 增量更新，新增', normalizedNightData.length - prev!.normalizedData.length, '筆');
       // 複製前一次的結果
       const chart = [...prev!.chartData];
       const segments = [...prev!.lineSegments];
@@ -504,7 +504,7 @@ const MinuteChart = ({ data, dayData, nightData, title = '分鐘級走勢', mark
     }
     
     // 完整計算
-    console.log('[夜盤] 完整計算，共', normalizedNightData.length, '筆資料');
+    // console.log('[夜盤] 完整計算，共', normalizedNightData.length, '筆資料');
     const result = computeChartDataAndSegments(normalizedNightData, nightTimeRange, nightAvgVolume);
     nightChartRef.current = {
       normalizedData: normalizedNightData,
@@ -528,7 +528,7 @@ const MinuteChart = ({ data, dayData, nightData, title = '分鐘級走勢', mark
     // 預先計算模式：直接返回對應的結果（不重新計算）
     if (usePrecomputedMode) {
       const result = marketType === 'regular' ? dayChartResult : nightChartResult;
-      console.log(`[使用] ${marketType === 'regular' ? '日盤' : '夜盤'} 預計算結果:`, result.lineSegments.length, '個線段');
+      // console.log(`[使用] ${marketType === 'regular' ? '日盤' : '夜盤'} 預計算結果:`, result.lineSegments.length, '個線段');
       return result;
     }
 

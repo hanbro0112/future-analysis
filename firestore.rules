@@ -7,11 +7,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // 路徑上的日期 (YYYYMMDD) 是否落在最近 2 天內（含當天）
+    // 路徑上的日期 (YYYYMMDD) 是否落在最近 5 天內（含當天），避免跨週末查詢上個交易日資料時被擋
     function isRecentDate(dateStr) {
       let docDate = timestamp.date(int(dateStr[0:4]), int(dateStr[4:6]), int(dateStr[6:8]));
       let today = timestamp.date(request.time.year(), request.time.month(), request.time.day());
-      return docDate >= today - duration.value(2, 'd') && docDate <= today;
+      return docDate >= today - duration.value(5, 'd') && docDate <= today;
     }
 
     // 台指期分鐘資料：market/{symbol}/{date}/{docId}

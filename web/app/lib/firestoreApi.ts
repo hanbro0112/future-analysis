@@ -2,7 +2,7 @@
  * Firestore 資料存取層
  * 讀取分鐘級期貨資料與每日分析
  */
-import { collection, query, orderBy, limit, getDocs, doc, getDoc, onSnapshot, Unsubscribe, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, doc, getDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { db } from './firebase';
 import type { MinuteBar } from '../types/minuteData';
 
@@ -41,25 +41,18 @@ export async function getMinuteData(
 ): Promise<MinuteBar[]> {
   try {
     const collectionPath = `market/${symbol}/${date}`;
-    console.log(`📊 讀取 Firestore 路徑: ${collectionPath}`, marketType ? `盤別: ${marketType}` : '全部');
-    
-    let q = query(
+    // console.log(`📊 讀取 Firestore 路徑: ${collectionPath}`, marketType ? `盤別: ${marketType}` : '全部');
+
+    // 集合 ID 為日期（每天不同），不使用 where + orderBy 的複合查詢
+    // （否則每天都要重新建立 composite index），盤別改在讀取後於前端過濾
+    const q = query(
       collection(db, collectionPath),
       orderBy('time', 'asc')
     );
-    
-    // 如果指定盤別，加上過濾條件
-    if (marketType) {
-      q = query(
-        collection(db, collectionPath),
-        where('market_type', '==', marketType),
-        orderBy('time', 'asc')
-      );
-    }
-    
+
     const querySnapshot = await getDocs(q);
-    const data: MinuteBar[] = [];
-    
+    let data: MinuteBar[] = [];
+
     querySnapshot.forEach((docSnap) => {
       const docData = docSnap.data();
       data.push({
@@ -82,7 +75,11 @@ export async function getMinuteData(
         analysis: docData.analysis
       });
     });
-    
+
+    if (marketType) {
+      data = data.filter((bar) => bar.market_type === marketType);
+    }
+
     // 如果是夜盤資料，需要重新排序（15:00-23:59 在前，00:00-05:59 在後）
     if (marketType === 'after_hours' && data.length > 0) {
       data.sort((a, b) => {
@@ -99,7 +96,7 @@ export async function getMinuteData(
       });
     }
     
-    console.log(`✅ 讀取成功: ${data.length} 筆資料`);
+    // console.log(`✅ 讀取成功: ${data.length} 筆資料`);
     return data;
   } catch (error) {
     console.error('❌ 讀取分鐘資料失敗:', error);

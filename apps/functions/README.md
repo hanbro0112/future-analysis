@@ -11,6 +11,15 @@
 
 兩個 function 都是 HTTP-triggered，`main.py` 匯入兩者供 `gcloud functions deploy --entry-point` 使用。
 
+## 元件說明
+
+| 檔案 | 功用 |
+| --- | --- |
+| `main.py` | Cloud Functions 進入點，匯出 `daily_report` / `chip_report` 供部署指定 entry-point |
+| `daily_report.py` | 呼叫 Gemini API 分析台股/美股市場，寫入 Firestore `daily_reports/{YYYYMMDD}`，內含 `is_trading_day` 交易日判斷 |
+| `chip_report.py` | 抓取台指籌碼快訊 PDF、裁切散戶多空比圖表，上傳 Cloud Storage `chip-reports/{YYYYMMDD}/` |
+| `README_CHIP_REPORT.md` | 籌碼快訊 PDF 裁切座標調整說明 |
+
 ## 環境變數
 
 ```bash
@@ -127,7 +136,9 @@ gcloud scheduler jobs create http daily-report-job \
   --time-zone="Asia/Taipei" \
   --uri="$DAILY_REPORT_URL" \
   --http-method=POST \
-  --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com"
+  --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com" \
+  --max-retry-attempts=3 \
+  --min-backoff=300s
 
 gcloud scheduler jobs create http chip-report-job \
   --location=asia-east1 \
@@ -135,11 +146,17 @@ gcloud scheduler jobs create http chip-report-job \
   --time-zone="Asia/Taipei" \
   --uri="$CHIP_REPORT_URL" \
   --http-method=POST \
-  --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com"
+  --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com" \
+  --max-retry-attempts=3 \
+  --min-backoff=600s
 ```
 
 Cron 排程已用 `1-5`（週一至週五）排除週末，`daily_report` 內部仍保留
 `is_trading_day` 判斷作為第二層保護；國定假日目前沒有排除，與拆分前行為一致。
+
+`daily_report` 呼叫 Gemini API 只執行一次（不再內建指數退避重試），失敗時回傳
+HTTP 500，改由上方 `daily-report-job` 的 `--max-retry-attempts` / `--min-backoff`
+接手重試。
 
 ## 相關文件
 

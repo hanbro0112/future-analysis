@@ -105,8 +105,8 @@ def handle_message(data: dict, analyzer: LongShortAnalyzer, aggregator: MinuteAg
         # 轉換為 TickData 物件
         tick = dict_to_tick(data)
         
-        #  # 執行多空比分析（保留在記憶體中)
-        # analysis_result = analyzer.analyze(tick)
+         # 執行多空比分析（保留在記憶體中)
+        analysis_result = analyzer.analyze(tick)
         
         # if analysis_result:
         #     # 顯示即時分析結果（包含視窗統計）

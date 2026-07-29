@@ -3,7 +3,6 @@ Daily Report - 每日市場分析報告
 使用 Gemini API 分析台股和美股市場，由 Cloud Scheduler 觸發的 Cloud Function
 """
 import os
-import time
 from datetime import datetime, timedelta
 from typing import Optional
 from google import genai
@@ -107,63 +106,38 @@ class DailyReportGenerator:
 
         print(f"📝 生成報告提示詞:\n{prompt}\n")
 
-        # 重試設定
-        max_retries = 5
-        base_delay = 2  # 基礎延遲（秒）
-        max_delay = 60  # 最大延遲（秒）
-
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    print(f"🔄 重試 {attempt}/{max_retries}...")
-                else:
-                    print(f"🤖 呼叫 Gemini API...")
-
-                # 呼叫 Gemini API
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        # 1. 明確告訴時間，確認時間安全限制
-                        system_instruction=f"Current year is {target_date.year}. Today's date is {target_date.strftime('%Y/%m/%d')}.",
-                        # 2. 開啟 Google 搜尋支援，讓模型可以查詢最新資訊
-                        tools=[types.Tool(google_search=types.GoogleSearch())]
-                    )
+        print(f"🤖 呼叫 Gemini API...")
+        try:
+            # 呼叫 Gemini API（僅呼叫一次，失敗改由 Cloud Scheduler 的重試機制處理）
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    # 1. 明確告訴時間，確認時間安全限制
+                    system_instruction=f"Current year is {target_date.year}. Today's date is {target_date.strftime('%Y/%m/%d')}.",
+                    # 2. 開啟 Google 搜尋支援，讓模型可以查詢最新資訊
+                    tools=[types.Tool(google_search=types.GoogleSearch())]
                 )
-                raw_content = response.text
+            )
+            raw_content = response.text
 
-                print(f"✅ Gemini API 回應成功\n")
-                print(f"📄 報告內容:\n{raw_content}\n")
+            print(f"✅ Gemini API 回應成功\n")
+            print(f"📄 報告內容:\n{raw_content}\n")
 
-                # 準備報告資料
-                report_data = {
-                    "date": target_date.strftime('%Y-%m-%d'),
-                    "raw_content": raw_content,
-                    "summary": {},  # 目前先留空，未來可以讓 Gemini 輸出結構化資料
-                    "model_used": self.model_name,
-                    "created_at": datetime.now().isoformat()
-                }
+            # 準備報告資料
+            report_data = {
+                "date": target_date.strftime('%Y-%m-%d'),
+                "raw_content": raw_content,
+                "summary": {},  # 目前先留空，未來可以讓 Gemini 輸出結構化資料
+                "model_used": self.model_name,
+                "created_at": datetime.now().isoformat()
+            }
 
-                return report_data
+            return report_data
 
-            except Exception as e:
-                error_str = str(e)
-
-                # 判斷是否為可重試的錯誤
-                is_retryable = any(code in error_str for code in ['503', '429', '500', '502', '504'])
-
-                if attempt < max_retries - 1 and is_retryable:
-                    # 計算延遲時間（指數退避）
-                    delay = min(base_delay * (2 ** attempt), max_delay)
-                    print(f"❌ Gemini API 呼叫失敗: {e}")
-                    print(f"⏳ 等待 {delay} 秒後重試...")
-                    time.sleep(delay)
-                else:
-                    # 最後一次重試或不可重試的錯誤
-                    print(f"❌ Gemini API 呼叫失敗: {e}")
-                    if attempt == max_retries - 1:
-                        print(f"❌ 已達最大重試次數 ({max_retries})，放棄重試")
-                    raise
+        except Exception as e:
+            print(f"❌ Gemini API 呼叫失敗: {e}")
+            raise
 
     def save_report(self, report_data: dict, firestore_writer) -> None:
         """
