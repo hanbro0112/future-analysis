@@ -18,6 +18,9 @@ from zoneinfo import ZoneInfo
 # 所有涉及交易時段判斷與 Firestore 文件路徑命名的時間都需以此時區為準。
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
+# WebSocket 關閉代碼：非交易時段拒絕連線（自訂應用層代碼，對應 HTTP 403）
+WS_CLOSE_CODE_NOT_TRADING_HOURS = 4403
+
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +29,55 @@ from config import config
 from pubsub import PubSubSubscriber
 
 from .auth import verify_firebase_token, InvalidTokenError
+
+
+def is_trading_hours(check_time: Optional[datetime] = None) -> bool:
+    """
+    判斷是否為交易時段
+
+    交易時段：
+    - 日盤：週一到週五 8:45-13:45
+    - 夜盤：週一到週四 15:00-次日 5:00，週五 15:00-23:59
+
+    Args:
+        check_time: 要檢查的時間，預設為當前台北時間
+
+    Returns:
+        True 如果在交易時段內
+    """
+    if check_time is None:
+        check_time = datetime.now(TAIPEI_TZ)
+
+    weekday = check_time.weekday()  # 0=週一, 6=週日
+    time_minutes = check_time.hour * 60 + check_time.minute
+
+    # 週末不交易
+    if weekday >= 5:
+        return False
+
+    # 日盤：8:45-13:45
+    if 8 * 60 + 45 <= time_minutes <= 13 * 60 + 45:
+        return True
+
+    # 夜盤：15:00-次日 5:00
+    # 週一到週四的夜盤可以延續到次日（週二到週五凌晨）
+    if weekday <= 3:  # 週一到週四
+        if time_minutes >= 15 * 60:  # 15:00 之後（當天夜盤開始）
+            return True
+        if time_minutes <= 5 * 60:  # 次日 5:00 之前（前一天夜盤延續）
+            return True
+
+    # 週五處理：
+    # - 凌晨 0:00-5:00：週四夜盤的延續
+    # - 日盤時段：已在上面處理
+    # - 15:00-23:59：週五夜盤（不延續到週六）
+    if weekday == 4:  # 週五
+        if time_minutes <= 5 * 60:  # 週四夜盤延續到週五凌晨 5:00
+            return True
+        if time_minutes >= 15 * 60:  # 週五夜盤開始（不延續）
+            return True
+
+    return False
 
 
 class TickData:
@@ -98,6 +150,11 @@ class PriceBroadcaster:
             except InvalidTokenError as e:
                 print(f"❌ WebSocket 驗證失敗: {e}")
                 await websocket.close(code=4401)
+                return
+
+            if not is_trading_hours():
+                print("⛔ 非交易時段，拒絕 WebSocket 連線")
+                await websocket.close(code=WS_CLOSE_CODE_NOT_TRADING_HOURS)
                 return
 
             await self.handle_websocket(websocket)
