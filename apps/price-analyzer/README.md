@@ -39,7 +39,7 @@
 # GCP 專案設定
 GCP_PROJECT_ID=demo-project
 PUBSUB_TOPIC_ID=price-updates
-PUBSUB_SUBSCRIPTION_ID=price-subscription
+PUBSUB_SUBSCRIPTION_ID_ANALYZER=price-analyzer-subscription
 
 # Firestore Emulator (開發環境)
 FIRESTORE_EMULATOR_HOST=localhost:8080

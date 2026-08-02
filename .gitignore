@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+package-lock.json
 npm-lock.json
 pnpm-lock.yaml
 yarn.lock
@@ -30,7 +31,7 @@ next-env.d.ts
 
 # next.js
 .next/
-/out/
+out/
 
 # misc
 .DS_Store

@@ -199,7 +199,7 @@ class PriceBroadcaster:
         """訂閱 Pub/Sub 訊息"""
         try:
             topic_id = config['pubsub_topic_id']
-            subscription_id = config['pubsub_subscription_id']
+            subscription_id = config['pubsub_subscription_id_broadcaster']
             project_id = config['gcp_project_id']
             topic_id = config['pubsub_topic_id']
             

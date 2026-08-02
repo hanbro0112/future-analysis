@@ -109,7 +109,7 @@ PUBSUB_EMULATOR_HOST=localhost:8085
 
 ```bash
 GCP_PROJECT_ID=demo-project
-PUBSUB_SUBSCRIPTION_ID=price-subscription
+PUBSUB_SUBSCRIPTION_ID_ANALYZER=price-analyzer-subscription
 
 # Emulator 配置（開發環境）
 PUBSUB_EMULATOR_HOST=localhost:8085
@@ -120,12 +120,16 @@ FIRESTORE_EMULATOR_HOST=localhost:8080
 
 ```bash
 GCP_PROJECT_ID=demo-project
-PUBSUB_SUBSCRIPTION_ID=price-subscription
+PUBSUB_SUBSCRIPTION_ID_BROADCASTER=price-broadcaster-subscription
 
 # Emulator 配置（開發環境）
 PUBSUB_EMULATOR_HOST=localhost:8085
 FIRESTORE_EMULATOR_HOST=localhost:8080
 ```
+
+> Price Analyzer 與 Price Broadcaster 訂閱同一個 Pub/Sub topic，但必須使用不同的 subscription id
+> （`PUBSUB_SUBSCRIPTION_ID_ANALYZER` / `PUBSUB_SUBSCRIPTION_ID_BROADCASTER`），
+> 否則本機同時啟動兩個服務時會互相競爭消費、各自漏收一半的 tick。
 
 ## 開發
 

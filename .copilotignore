@@ -1,7 +1,0 @@
-# Environment files
-.env
-.env.*
-!.env.example
-
-# 永豐 CA 憑證
-Sinopac.pfx

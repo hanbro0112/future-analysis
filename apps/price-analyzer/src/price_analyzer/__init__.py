@@ -244,7 +244,7 @@ def main() -> None:
         
         # 取得 Pub/Sub 配置
         topic_id = config['pubsub_topic_id']
-        subscription_id = config['pubsub_subscription_id']
+        subscription_id = config['pubsub_subscription_id_analyzer']
         project_id = config['gcp_project_id']
         
         # 確保 Topic 存在（若無則自動創建）

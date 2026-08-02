@@ -107,9 +107,12 @@ uv run python test_ws_client.py
 config = {
     'gcp_project_id': 'demo-project',
     'pubsub_topic_id': 'price-updates',
-    'pubsub_subscription_id': 'price-subscription'
+    'pubsub_subscription_id_broadcaster': 'price-broadcaster-subscription'
 }
 ```
+
+> 這裡的 subscription 必須跟 price-analyzer 的分開（`pubsub_subscription_id_analyzer`），
+> 兩個服務訂閱同一個 topic，但共用同一個 subscription 會導致訊息被瓜分而非各自收到全部。
 
 ## 架構
 
