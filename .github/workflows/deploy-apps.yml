@@ -93,7 +93,7 @@ jobs:
             --no-cpu-throttling \
             --memory=512Mi \
             --timeout=3600 \
-            --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}",PUBSUB_TOPIC_ID=price-updates,PUBSUB_SUBSCRIPTION_ID=price-analyzer-subscription
+            --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}",PUBSUB_TOPIC_ID=price-updates,PUBSUB_SUBSCRIPTION_ID_ANALYZER=price-analyzer-subscription
 
       - name: 建置並推送 price-broadcaster
         if: ${{ inputs.target == 'all' || inputs.target == 'price-broadcaster' }}
@@ -115,4 +115,4 @@ jobs:
             --no-cpu-throttling \
             --memory=512Mi \
             --timeout=3600 \
-            --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}",PUBSUB_TOPIC_ID=price-updates,PUBSUB_SUBSCRIPTION_ID=price-broadcaster-subscription
+            --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}",PUBSUB_TOPIC_ID=price-updates,PUBSUB_SUBSCRIPTION_ID_BROADCASTER=price-broadcaster-subscription

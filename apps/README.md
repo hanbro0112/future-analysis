@@ -109,7 +109,7 @@ PUBSUB_EMULATOR_HOST=localhost:8085
 
 ```bash
 GCP_PROJECT_ID=demo-project
-PUBSUB_SUBSCRIPTION_ID=price-subscription
+PUBSUB_SUBSCRIPTION_ID_ANALYZER=price-analyzer-subscription
 
 # Emulator 配置（開發環境）
 PUBSUB_EMULATOR_HOST=localhost:8085
@@ -120,12 +120,16 @@ FIRESTORE_EMULATOR_HOST=localhost:8080
 
 ```bash
 GCP_PROJECT_ID=demo-project
-PUBSUB_SUBSCRIPTION_ID=price-subscription
+PUBSUB_SUBSCRIPTION_ID_BROADCASTER=price-broadcaster-subscription
 
 # Emulator 配置（開發環境）
 PUBSUB_EMULATOR_HOST=localhost:8085
 FIRESTORE_EMULATOR_HOST=localhost:8080
 ```
+
+> Price Analyzer 與 Price Broadcaster 訂閱同一個 Pub/Sub topic，但必須使用不同的 subscription id
+> （`PUBSUB_SUBSCRIPTION_ID_ANALYZER` / `PUBSUB_SUBSCRIPTION_ID_BROADCASTER`），
+> 否則本機同時啟動兩個服務時會互相競爭消費、各自漏收一半的 tick。
 
 ## 開發
 
@@ -176,14 +180,13 @@ uv add package-name
 ### Price Analyzer（價格分析服務）
 - 訂閱 Pub/Sub 的 tick 資料
 - 分析價格並計算指標（如多空比）
-- 將分析結果儲存到 Firestore
+- 計算每分鐘 OHLCV 統計，並將分析結果儲存到 Firestore
+- 每秒取樣重建秒級報價明細（前向填充、跨分鐘/跨日連續性），儲存到 Firestore
 - 詳見：[price-analyzer/README.md](price-analyzer/src/price_analyzer/STRATEGY_README.md)
 
 ### Price Broadcaster（報價廣播服務）
 - 訂閱 Pub/Sub 的 tick 資料
 - 透過 WebSocket 即時廣播最新報價（每秒一次）
-- 每分鐘儲存完整 60 筆報價到 Firestore
-- 支援前向填充和跨分鐘連續性
 - 詳見：[price-broadcaster/README.md](price-broadcaster/README.md)
 
 ### Functions（定時任務）

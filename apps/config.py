@@ -22,7 +22,8 @@ config = {
     # GCP 配置
     "gcp_project_id": os.getenv("GCP_PROJECT_ID", "demo-project"),
     "pubsub_topic_id": os.getenv("PUBSUB_TOPIC_ID", "price-updates"),
-    "pubsub_subscription_id": os.getenv("PUBSUB_SUBSCRIPTION_ID", "price-subscription"),
+    "pubsub_subscription_id_analyzer": os.getenv("PUBSUB_SUBSCRIPTION_ID_ANALYZER", "price-analyzer-subscription"),
+    "pubsub_subscription_id_broadcaster": os.getenv("PUBSUB_SUBSCRIPTION_ID_BROADCASTER", "price-broadcaster-subscription"),
 }
 
 __all__ = ["config"]
