@@ -38,4 +38,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy web/out --project-name=txfutures
+          # 強制帶入 --branch=main，Cloudflare 會將其判斷為 Production 部署
+          command: pages deploy web/out --project-name=txfutures --branch=main
