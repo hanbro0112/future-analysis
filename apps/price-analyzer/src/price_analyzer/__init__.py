@@ -17,7 +17,7 @@ from config import config
 from pubsub import PubSubSubscriber
 from firestore_writer import FirestoreWriter
 from .strategy import LongShortAnalyzer, TickData
-from .minute_aggregator import MinuteAggregator, MinuteBar, now_taipei
+from .minute_aggregator import MinuteAggregator, MinuteBar, SecondBar, now_taipei
 
 
 # ========== 獨立回調函數 ==========
@@ -68,17 +68,44 @@ def on_minute_complete(minute_bar: MinuteBar, firestore_writer: FirestoreWriter,
         print(f"❌ 儲存分鐘資料時發生錯誤: {type(e).__name__}: {e}")
 
 
-def schedule_auto_flush(aggregator: MinuteAggregator, timer_lock: threading.Lock, timer_ref: dict):
-    """定時檢查並自動 flush（每 30 秒執行一次）"""
+def on_second_data_complete(second_bar: SecondBar, firestore_writer: FirestoreWriter) -> None:
+    """
+    當一分鐘的秒級報價明細完成時寫入 Firestore（原 price-broadcaster 的每分鐘報價儲存邏輯）
+    """
     try:
+        # 建立 Firestore 路徑：market/{code}/{YYYYMMDD}_tick/{HHMM}
+        collection_path = f"market/{second_bar.code}/{second_bar.date}_tick"
+
+        firestore_writer.write_document(
+            collection=collection_path,
+            data=second_bar.prices,
+            document_id=second_bar.time
+        )
+
+        print(f"💾 已儲存秒級報價: {second_bar.code}/{second_bar.date}_tick/{second_bar.time} "
+              f"(報價 {len(second_bar.prices)} 筆)")
+
+    except Exception as e:
+        print(f"❌ 儲存秒級報價時發生錯誤: {e}")
+
+
+def schedule_auto_flush(aggregator: MinuteAggregator, timer_lock: threading.Lock, timer_ref: dict):
+    """
+    每秒執行一次的背景定時器。
+
+    同時負責兩件事：秒級報價取樣（原 price-broadcaster 職責）與分鐘 OHLC 逾時保險 flush，
+    統一成單一 timer 執行緒，避免多個背景執行緒同時存取聚合器的共用狀態。
+    """
+    try:
+        aggregator.sample_current_second()
         aggregator.auto_flush_if_needed(delay_minutes=1.5)
     except Exception as e:
         print(f"⚠️  自動 flush 時發生錯誤: {e}")
-    
+
     # 重新排程下一次檢查
     with timer_lock:
         if timer_ref.get('timer') is not None:  # 確認沒有被取消
-            timer = threading.Timer(30.0, lambda: schedule_auto_flush(aggregator, timer_lock, timer_ref))
+            timer = threading.Timer(1.0, lambda: schedule_auto_flush(aggregator, timer_lock, timer_ref))
             timer.daemon = True
             timer.start()
             timer_ref['timer'] = timer
@@ -104,7 +131,15 @@ def handle_message(data: dict, analyzer: LongShortAnalyzer, aggregator: MinuteAg
     try:
         # 轉換為 TickData 物件
         tick = dict_to_tick(data)
-        
+
+        # 記錄這筆 tick 的報價，供每秒取樣重建秒級明細（原 price-broadcaster 職責）
+        aggregator.record_tick_price(
+            code=tick.code,
+            price=float(tick.close),
+            underlying_price=float(tick.underlying_price),
+            volume=tick.volume,
+        )
+
          # 執行多空比分析（保留在記憶體中)
         analysis_result = analyzer.analyze(tick)
         
@@ -203,7 +238,8 @@ def main() -> None:
         
         # 初始化分鐘聚合器（使用 lambda 綁定參數）
         aggregator = MinuteAggregator(
-            on_minute_complete=lambda bar: on_minute_complete(bar, firestore_writer, analyzer)
+            on_minute_complete=lambda bar: on_minute_complete(bar, firestore_writer, analyzer),
+            on_second_data_complete=lambda second_bar: on_second_data_complete(second_bar, firestore_writer),
         )
         
         # 取得 Pub/Sub 配置
@@ -245,20 +281,21 @@ def main() -> None:
 
         signal.signal(signal.SIGTERM, _handle_sigterm)
 
-        # 啟動自動 flush 定時器
+        # 啟動自動 flush 定時器（每秒執行，同時負責秒級取樣與分鐘 OHLC 逾時保險 flush）
         with timer_lock:
             flush_timer_ref['timer'] = threading.Timer(
-                30.0, 
+                1.0,
                 lambda: schedule_auto_flush(aggregator, timer_lock, flush_timer_ref)
             )
             flush_timer_ref['timer'].daemon = True
             flush_timer_ref['timer'].start()
-            print("⏰ 自動 flush 定時器已啟動（每 30 秒檢查一次）\n")
-            
-        
+            print("⏰ 自動 flush 定時器已啟動（每秒取樣並檢查一次）\n")
+
+
         # 開始訂閱（阻塞式運行）
         print("🚀 Price Analyzer 已啟動（分鐘級聚合模式）\n")
         print("📊 資料結構：market/{商品代碼}/{YYYYMMDD}/{HHMM}\n")
+        print("📊 秒級明細：market/{商品代碼}/{YYYYMMDD}_tick/{HHMM}\n")
         
         # 訂閱訊息（使用 lambda 綁定參數）
         subscriber.subscribe(

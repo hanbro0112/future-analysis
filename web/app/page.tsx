@@ -258,11 +258,17 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
     try {
       if (marketType === 'after_hours') {
         // 夜盤：使用當天日盤收盤價
-        const dayData = allData.filter(bar => bar.market_type === 'regular');
-        if (dayData.length > 0) {
-          const refPrice = dayData[dayData.length - 1].close;
-          console.log('🔵 夜盤參考價（當天日盤收盤）:', refPrice);
-          return refPrice;
+        // 以夜盤資料本身的日期（與標題文字同一套邏輯）為準，而非批次抓取日盤資料時的系統當前時間
+        if (currentData.length > 0) {
+          const nightDate = new Date(currentData[0].date);
+          const dateStr = formatDateToYYYYMMDD(nightDate);
+
+          const dayData = await getMinuteData('MXF', dateStr, 'regular');
+          if (dayData.length > 0) {
+            const refPrice = dayData[dayData.length - 1].close;
+            console.log('🔵 夜盤參考價（當天日盤收盤）:', refPrice, '日期:', dateStr);
+            return refPrice;
+          }
         }
       } else {
         // 日盤：使用前一天日盤收盤價（考慮假日）
