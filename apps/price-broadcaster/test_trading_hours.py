@@ -38,7 +38,28 @@ def test_is_trading_hours_false_before_market_open():
 
 
 def test_is_trading_hours_false_on_weekend():
-    """週六應判定為非交易時段"""
+    """週六白天應判定為非交易時段"""
     dt = datetime(2026, 8, 1, 12, 0, tzinfo=TAIPEI_TZ)  # 2026-08-01 為週六
+
+    assert is_trading_hours(dt) is False
+
+
+def test_is_trading_hours_true_on_saturday_early_morning_as_friday_night_session():
+    """週五夜盤延續到週六凌晨，台北時間週六 02:00 應判定為交易時段"""
+    dt = datetime(2026, 8, 1, 2, 0, tzinfo=TAIPEI_TZ)  # 2026-08-01 為週六
+
+    assert is_trading_hours(dt) is True
+
+
+def test_is_trading_hours_false_on_saturday_after_night_session_ends():
+    """週五夜盤已結束，台北時間週六 05:01 應判定為非交易時段"""
+    dt = datetime(2026, 8, 1, 5, 1, tzinfo=TAIPEI_TZ)  # 2026-08-01 為週六
+
+    assert is_trading_hours(dt) is False
+
+
+def test_is_trading_hours_false_on_sunday():
+    """週日全天應判定為非交易時段（不會有新夜盤開盤）"""
+    dt = datetime(2026, 8, 2, 16, 30, tzinfo=TAIPEI_TZ)  # 2026-08-02 為週日
 
     assert is_trading_hours(dt) is False

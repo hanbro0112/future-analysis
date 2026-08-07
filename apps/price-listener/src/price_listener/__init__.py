@@ -62,48 +62,41 @@ def is_trading_hours(check_time: datetime | None = None) -> bool:
     
     交易時段：
     - 日盤：週一到週五 8:45-13:45
-    - 夜盤：週一到週四 15:00-次日 5:00，週五 15:00-23:59
-    
+    - 夜盤：週一到週五 15:00-次日 5:00（週五夜盤延續至週六凌晨 5:00，週六、週日無新夜盤開盤）
+
     Args:
         check_time: 要檢查的時間，預設為當前時間
-    
+
     Returns:
         True 如果在交易時段內
     """
     if check_time is None:
         check_time = now_taipei()
-    
+
     weekday = check_time.weekday()  # 0=週一, 6=週日
     hour = check_time.hour
     minute = check_time.minute
     time_minutes = hour * 60 + minute
-    
-    # 週末不交易
+
+    # 凌晨 0:00-5:00：若前一天是週一到週五，屬於該日夜盤的延續
+    # （週五夜盤會延續到週六凌晨，因此週六 0:00-5:00 仍屬交易時段）
+    if time_minutes <= 5 * 60:
+        prev_weekday = (weekday - 1) % 7
+        if prev_weekday <= 4:
+            return True
+
+    # 週末（週六、週日）不會有新的日盤或夜盤開盤
     if weekday >= 5:
         return False
-    
+
     # 日盤：8:45-13:45
     if 8 * 60 + 45 <= time_minutes <= 13 * 60 + 45:
         return True
-    
-    # 夜盤：15:00-次日 5:00
-    # 週一到週四的夜盤可以延續到次日（週二到週五凌晨）
-    if weekday <= 3:  # 週一到週四
-        if time_minutes >= 15 * 60:  # 15:00 之後（當天夜盤開始）
-            return True
-        if time_minutes <= 5 * 60:  # 次日 5:00 之前（前一天夜盤延續）
-            return True
-    
-    # 週五處理：
-    # - 凌晨 0:00-5:00：週四夜盤的延續
-    # - 日盤時段：已在上面處理
-    # - 15:00-23:59：週五夜盤（不延續到週六）
-    if weekday == 4:  # 週五
-        if time_minutes <= 5 * 60:  # 週四夜盤延續到週五凌晨 5:00
-            return True
-        if time_minutes >= 15 * 60:  # 週五夜盤開始（不延續）
-            return True
-    
+
+    # 夜盤開盤：15:00 之後
+    if time_minutes >= 15 * 60:
+        return True
+
     return False
 
 

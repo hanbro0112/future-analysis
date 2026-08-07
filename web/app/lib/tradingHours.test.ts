@@ -19,8 +19,17 @@ describe('isInTradingHours', () => {
     expect(isInTradingHours(new Date('2026-08-01T04:00:00Z'))).toBe(false);
   });
 
-  it('週五夜盤不延續到週六，週六凌晨（台北時間 02:00）應判定為非交易時段', () => {
-    expect(isInTradingHours(new Date('2026-07-31T18:00:00Z'))).toBe(false);
+  it('週五夜盤延續到週六凌晨，週六凌晨（台北時間 02:00）應判定為交易時段', () => {
+    expect(isInTradingHours(new Date('2026-07-31T18:00:00Z'))).toBe(true);
+  });
+
+  it('週五夜盤延續結束後，週六（台北時間 05:01）應判定為非交易時段', () => {
+    expect(isInTradingHours(new Date('2026-07-31T21:01:00Z'))).toBe(false);
+  });
+
+  it('週日全天不會有新夜盤開盤，週日（台北時間 16:30）應判定為非交易時段', () => {
+    // 2026-08-02 為週日
+    expect(isInTradingHours(new Date('2026-08-02T08:30:00Z'))).toBe(false);
   });
 
   it('日盤收盤邊界：台北時間 13:45 為交易時段、13:46 起為非交易時段（與後端一致，無緩衝）', () => {

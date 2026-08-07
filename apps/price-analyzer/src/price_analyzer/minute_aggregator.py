@@ -397,9 +397,9 @@ class MinuteAggregator:
 
         台指期交易時間：
         - 日盤：週一至週五 08:45 - 13:45
-        - 夜盤：週一至週五 15:00 - 次日 05:00
-        - 週六：00:00-05:00（週五夜盤延續）
-        - 週日：15:00 開始（週日夜盤）
+        - 夜盤：週一至週五 15:00 - 次日 05:00（週五夜盤延續至週六凌晨 05:00）
+        - 週六：00:00-05:00（週五夜盤延續），其餘時間不交易
+        - 週日：全天不交易
 
         Args:
             dt: 時間
@@ -421,9 +421,9 @@ class MinuteAggregator:
         if day == 5:
             return time_in_minutes < night_session_end
 
-        # 週日：只有夜盤（15:00 開始）
+        # 週日：全天不交易
         if day == 6:
-            return time_in_minutes >= night_session_start
+            return False
 
         # 週一至週五
         if day_session_start <= time_in_minutes <= day_session_end:
