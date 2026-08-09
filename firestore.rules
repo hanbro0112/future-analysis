@@ -23,5 +23,18 @@ service cloud.firestore {
     match /daily_reports/{date} {
       allow read: if isAuthenticated() && isRecentDate(date);
     }
+
+    // PTT Stock 板盤中/盤後閒聊：pttThreads/pttPosts/{date}_{session}
+    match /pttThreads/{docId} {
+      allow read: if isAuthenticated();
+    }
+    match /pttPosts/{docId} {
+      allow read: if isAuthenticated();
+    }
+
+    // 使用者 PTT 閒聊個人設定（已讀位置、視窗大小）：users/{uid}/setting/pttReadState，僅本人可讀寫
+    match /users/{uid}/setting/pttReadState {
+      allow read, write: if isAuthenticated() && request.auth.uid == uid;
+    }
   }
 }

@@ -8,8 +8,9 @@
 | --- | --- | --- | --- |
 | `daily_report` | `daily_report.py` | 使用 Gemini API 分析台股/美股，寫入 Firestore `daily_reports/{YYYYMMDD}` | 每天 08:00（僅交易日執行，週末由程式內部判斷跳過） |
 | `chip_report` | `chip_report.py` | 抓取台指籌碼快訊 PDF，提取圖表上傳 Cloud Storage `chip-reports/{YYYYMMDD}/` | 每交易日 15:21 |
+| `crawl_ptt_chat` | `ptt_chat.py` | 抓取 PTT Stock 板盤中/盤後閒聊推文，寫入 Firestore `pttThreads`/`pttPosts` | 每分鐘（尚未加入 Cloud Scheduler，見 [README_PTT_CHAT.md](README_PTT_CHAT.md)） |
 
-兩個 function 都是 HTTP-triggered，`main.py` 匯入兩者供 `gcloud functions deploy --entry-point` 使用。
+三個 function 都是 HTTP-triggered，`main.py` 匯入供 `gcloud functions deploy --entry-point` 使用。
 
 ## 元件說明
 
@@ -19,6 +20,8 @@
 | `daily_report.py` | 呼叫 Gemini API 分析台股/美股市場，寫入 Firestore `daily_reports/{YYYYMMDD}`，內含 `is_trading_day` 交易日判斷 |
 | `chip_report.py` | 抓取台指籌碼快訊 PDF、裁切散戶多空比圖表，上傳 Cloud Storage `chip-reports/{YYYYMMDD}/` |
 | `README_CHIP_REPORT.md` | 籌碼快訊 PDF 裁切座標調整說明 |
+| `ptt_chat.py` | 抓取 PTT Stock 板盤中/盤後閒聊推文，寫入 Firestore `pttThreads`/`pttPosts` |
+| `README_PTT_CHAT.md` | PTT 閒聊功能說明、Firestore schema、部署方式 |
 
 ## 環境變數
 
@@ -41,9 +44,14 @@ uv run python test_daily_report.py --skip-save
 # 手動測試籌碼快訊
 uv run python test_chip_report.py
 
+# PTT 閒聊爬蟲：pytest 單元測試 + 手動觸發（詳見 README_PTT_CHAT.md）
+uv run pytest test_ptt_chat.py
+uv run python test_ptt_chat_manual.py
+
 # 用 functions-framework 本地啟動 HTTP server 測試
 uv run functions-framework --target=daily_report --debug
 uv run functions-framework --target=chip_report --debug
+uv run functions-framework --target=crawl_ptt_chat --debug
 ```
 
 ## 部署（GitHub Action，推薦）
@@ -161,3 +169,4 @@ HTTP 500，改由上方 `daily-report-job` 的 `--max-retry-attempts` / `--min-b
 ## 相關文件
 
 - [README_CHIP_REPORT.md](README_CHIP_REPORT.md) - 籌碼快訊裁切座標調整說明
+- [README_PTT_CHAT.md](README_PTT_CHAT.md) - PTT 閒聊功能說明、Firestore schema、部署方式

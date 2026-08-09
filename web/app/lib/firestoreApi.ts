@@ -2,9 +2,10 @@
  * Firestore 資料存取層
  * 讀取分鐘級期貨資料與每日分析
  */
-import { collection, query, orderBy, limit, getDocs, doc, getDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { db } from './firebase';
 import type { MinuteBar } from '../types/minuteData';
+import type { PttPush, PttSession } from '../types/pttChat';
 
 /**
  * 獲取最近的交易日（排除週末）
@@ -334,6 +335,137 @@ export async function getTodayDailyReport(): Promise<DailyReport | null> {
   
   const dateStr = formatDateToYYYYMMDD(dateForQuery);
   console.log(`📅 查詢每日分析日期: ${dateStr} (當前時間: ${hour}:${String(minute).padStart(2, '0')})`);
-  
+
   return getDailyReport(dateStr);
+}
+
+/**
+ * 監聽指定日期與盤別的 PTT Stock 板閒聊訊息
+ * @param session 'intraday' (盤中閒聊) | 'afterhours' (盤後閒聊)
+ * @param date 日期 (格式: YYYYMMDD)
+ * @param callback 訊息更新回調函數
+ * @returns 取消監聽函數
+ */
+export function subscribeToPttPosts(
+  session: PttSession,
+  date: string,
+  callback: (posts: PttPush[]) => void
+): Unsubscribe {
+  const docId = `${date}_${session}`;
+  const docRef = doc(db, 'pttPosts', docId);
+
+  return onSnapshot(docRef, (docSnap) => {
+    const data = docSnap.data();
+    const posts = (data?.posts as PttPush[] | undefined) || [];
+    const updatedAt = data?.updated_at?.toDate?.() ?? data?.updated_at ?? null;
+
+    // TODO(debug): 排查前端收不到 PTT 訊息問題，之後移除
+    console.log(
+      `[PTT DEBUG] pttPosts/${docId} exists=${docSnap.exists()} posts=${posts.length} updated_at=${updatedAt}`
+    );
+
+    callback(posts);
+  }, (error) => {
+    console.error(`❌ 監聽 PTT 閒聊訊息失敗 (pttPosts/${docId}):`, error);
+  });
+}
+
+/**
+ * PTT 閒聊個人設定文件路徑：users/{uid}/setting/pttReadState
+ * 盤中/盤後的已讀位置與視窗大小都合併存在同一份文件裡，
+ * 已讀位置用 intraday/afterhours 各自的巢狀欄位分開、用 dot-notation 局部更新，
+ * 不會互相覆蓋、也不會動到 width/height
+ */
+function getPttSettingDocRef(uid: string) {
+  return doc(db, 'users', uid, 'setting', 'pttReadState');
+}
+
+/**
+ * 取得使用者在指定日期與盤別的已讀位置（posts 陣列的索引）
+ *
+ * intraday/afterhours 共用同一份文件，各自的巢狀欄位內用 date 記錄該已讀位置屬於哪一天；
+ * 若存的 date 跟查詢的 date 不同，代表是前一天殘留的舊資料，對今天全新的訊息列表沒有意義，
+ * 視為未讀（回傳 -1）
+ *
+ * @param uid 使用者 ID
+ * @param session 'intraday' | 'afterhours'
+ * @param date 日期 (格式: YYYYMMDD)
+ * @returns 已讀到的索引，無記錄或記錄屬於別天則回傳 -1
+ */
+export async function getPttReadState(uid: string, session: PttSession, date: string): Promise<number> {
+  try {
+    const docSnap = await getDoc(getPttSettingDocRef(uid));
+    if (!docSnap.exists()) {
+      return -1;
+    }
+    const sessionData = docSnap.data()[session];
+    if (!sessionData || sessionData.date !== date) {
+      return -1;
+    }
+    const lastReadIndex = sessionData.last_read_index;
+    return typeof lastReadIndex === 'number' ? lastReadIndex : -1;
+  } catch (error) {
+    console.error('❌ 讀取 PTT 已讀位置失敗:', error);
+    return -1;
+  }
+}
+
+/**
+ * 儲存使用者在指定日期與盤別的已讀位置（隔天會覆蓋掉前一天的值，不影響另一個 session 或視窗大小）
+ * @param uid 使用者 ID
+ * @param session 'intraday' | 'afterhours'
+ * @param date 日期 (格式: YYYYMMDD)
+ * @param lastReadIndex 已讀到的索引
+ */
+export async function savePttReadState(
+  uid: string,
+  session: PttSession,
+  date: string,
+  lastReadIndex: number
+): Promise<void> {
+  try {
+    await setDoc(
+      getPttSettingDocRef(uid),
+      { [`${session}.date`]: date, [`${session}.last_read_index`]: lastReadIndex },
+      { merge: true }
+    );
+  } catch (error) {
+    console.error('❌ 儲存 PTT 已讀位置失敗:', error);
+  }
+}
+
+/**
+ * 取得使用者上次調整過的 PTT 閒聊視窗大小
+ * @param uid 使用者 ID
+ * @returns 寬高（px），無記錄則回傳 null
+ */
+export async function getPttWindowSize(uid: string): Promise<{ width: number; height: number } | null> {
+  try {
+    const docSnap = await getDoc(getPttSettingDocRef(uid));
+    if (!docSnap.exists()) {
+      return null;
+    }
+    const data = docSnap.data();
+    if (typeof data.width === 'number' && typeof data.height === 'number') {
+      return { width: data.width, height: data.height };
+    }
+    return null;
+  } catch (error) {
+    console.error('❌ 讀取 PTT 視窗大小失敗:', error);
+    return null;
+  }
+}
+
+/**
+ * 儲存使用者調整過的 PTT 閒聊視窗大小（不影響已讀位置）
+ * @param uid 使用者 ID
+ * @param width 寬度 (px)
+ * @param height 高度 (px)
+ */
+export async function savePttWindowSize(uid: string, width: number, height: number): Promise<void> {
+  try {
+    await setDoc(getPttSettingDocRef(uid), { width, height }, { merge: true });
+  } catch (error) {
+    console.error('❌ 儲存 PTT 視窗大小失敗:', error);
+  }
 }
