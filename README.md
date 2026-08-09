@@ -2,13 +2,15 @@
 
 分析台指期（小型台指期貨）多空交易資訊，即時擷取報價、計算多空指標並提供前端視覺化儀表板。
 
+<a href="https://txfutures.com/" target="_blank">https://txfutures.com </a>
+
 ## 專案架構總覽
 
 Monorepo 包含一個前端專案與一組 Python 後端服務（Cloud Run + Cloud Functions），共用同一個 Firebase/GCP 專案。
 
 | 專案 | 說明 | 文件 |
 | --- | --- | --- |
-| [web/](web) | Next.js 前端，即時走勢圖、分鐘級多空分析、籌碼快訊、每日 AI 報告，登入後直接讀取 Firestore/Storage | [web/README.md](web/README.md) |
+| [web/](web) | Next.js 前端（靜態匯出，部署於 Cloudflare Pages），即時走勢圖、分鐘級多空分析、籌碼快訊、每日 AI 報告，登入後直接讀取 Firestore/Storage | [web/README.md](web/README.md) |
 | [apps/price-listener/](apps/price-listener) | 透過永豐 Shioaji API 監聽台指期逐筆報價，發布到 Pub/Sub | [apps/price-listener/README.md](apps/price-listener/README.md) |
 | [apps/price-analyzer/](apps/price-analyzer) | 訂閱逐筆報價，聚合成分鐘 OHLCV 並計算多空比，並將每秒報價前向填充後存檔，皆寫入 Firestore | [apps/price-analyzer/README.md](apps/price-analyzer/README.md) |
 | [apps/price-broadcaster/](apps/price-broadcaster) | 訂閱逐筆報價，透過 WebSocket 每秒廣播給前端 | [apps/price-broadcaster/README.md](apps/price-broadcaster/README.md) |
@@ -17,6 +19,67 @@ Monorepo 包含一個前端專案與一組 Python 後端服務（Cloud Run + Clo
 | [apps/libs/firestore-writer/](apps/libs/firestore-writer) | 共用 Firestore 寫入模組 | [apps/libs/firestore-writer/README.md](apps/libs/firestore-writer/README.md) |
 
 三個 `apps/price-*` 服務與共用模組由同一個 `apps/` uv workspace 管理，詳見 [apps/README.md](apps/README.md)。
+
+## 系統架構
+
+前端與後端分別部署在不同雲端平台：`web` 是靜態匯出的 Next.js 站台，部署在 **Cloudflare Pages**；其餘服務（Cloud Run / Cloud Functions）都在 **GCP**。瀏覽器跨雲直接連線 Cloudflare Pages（畫面）與 GCP 上的 Firebase 服務、WebSocket（資料）。
+
+```mermaid
+flowchart TB
+    User(("使用者瀏覽器"))
+    GH["GitHub Actions\n(CI/CD)"]
+    EXCHANGE["Shioaji API\n永豐證券"]
+
+    subgraph CFP["Cloudflare Pages"]
+        WEB["web\nNext.js 靜態匯出"]
+    end
+
+    subgraph GCPBOX["GCP（asia-east1，Firebase 專案）"]
+        direction TB
+        SCHED["Cloud Scheduler\n定時任務 + 日夜盤切換"]
+        WFLOW["GCP Workflows\n調整 Cloud Run min-instances"]
+
+        subgraph RUN["Cloud Run"]
+            L["price-listener"]
+            A["price-analyzer"]
+            B["price-broadcaster"]
+        end
+
+        subgraph FUNC["Cloud Functions"]
+            DR["daily-report"]
+            CHR["chip-report"]
+        end
+
+        PUBSUB[("Pub/Sub")]
+        FIRESTORE[("Firestore")]
+        STORAGE[("Cloud Storage")]
+        AUTH["Firebase Auth"]
+    end
+
+    GH -. 部署 .-> WEB
+    GH -. 部署 .-> RUN
+    GH -. 部署 .-> FUNC
+
+    EXCHANGE -- tick --> L
+    L --> PUBSUB
+    PUBSUB --> A
+    PUBSUB --> B
+    A --> FIRESTORE
+    B --> FIRESTORE
+
+    SCHED --> DR
+    SCHED --> CHR
+    SCHED --> WFLOW
+    WFLOW -. 調整 min-instances .-> RUN
+    DR --> FIRESTORE
+    CHR --> STORAGE
+
+    User --> WEB
+    WEB == WebSocket ==> B
+    WEB == 讀取/即時監聽 ==> FIRESTORE
+    WEB --> STORAGE
+    WEB --> AUTH
+```
 
 ## 資料流程
 
@@ -61,6 +124,8 @@ flowchart LR
 
 ## GCP 架構
 
+以下皆為 GCP 元件；`web` 前端不在此列，改部署於 Cloudflare Pages（見上方系統架構圖）。
+
 | 元件 | 用途 |
 | --- | --- |
 | **Cloud Run** | 執行 `price-listener` / `price-analyzer` / `price-broadcaster` 三個常駐服務，`asia-east1` |
@@ -82,8 +147,9 @@ flowchart LR
 | [.github/workflows/deploy-apps.yml](.github/workflows/deploy-apps.yml) | 建置並部署 `price-listener` / `price-analyzer` / `price-broadcaster` 到 Cloud Run |
 | [.github/workflows/deploy-cron-job.yml](.github/workflows/deploy-cron-job.yml) | 部署 `daily-report` / `chip-report` 到 Cloud Functions |
 | [.github/workflows/deploy-firebase-rules.yml](.github/workflows/deploy-firebase-rules.yml) | 部署 Firestore / Storage 安全規則 |
+| [.github/workflows/deploy-web.yml](.github/workflows/deploy-web.yml) | 將 `web` 以 `next build` 靜態匯出後，透過 `wrangler-action` 部署到 **Cloudflare Pages**（project: `txfutures`） |
 
-`web` 前端目前未納入本 repo 的 GCP 部署流程，僅以 Firebase SDK 直接連線既有 Firestore/Storage/Auth。
+`web` 前端部署在 Cloudflare（非 GCP），建置時以環境變數注入 Firebase 專案設定與 `price-broadcaster` 的 WebSocket 網址，執行期再跨雲直接連線 GCP 上的 Firebase Auth/Firestore/Storage 與 Cloud Run 的 WebSocket。
 
 ### 本地開發
 
