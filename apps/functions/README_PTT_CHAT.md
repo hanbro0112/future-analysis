@@ -99,42 +99,43 @@ uv run python test_ptt_chat_manual.py --now "2026-08-06 14:00"   # 模擬觸發�
 
 ## 部署
 
-`main.py` 已匯出 `crawl_ptt_chat`，但尚未加入 GitHub Action 部署流程與 Cloud Scheduler 排程，
-需要額外設定（部署方式比照 [README.md](README.md) 的 `daily_report`/`chip_report`）：
+Cloud Function 本身已加入 [.github/workflows/deploy-cron-job.yml](../../.github/workflows/deploy-cron-job.yml)，
+在 GitHub Actions 頁面手動觸發（`workflow_dispatch`）選擇 `ptt-chat` 或 `all` 即可部署
+（部署名稱 `ptt-chat`，entry point `crawl_ptt_chat`）。詳見 [README.md](README.md) 的部署說明。
+
+**Cloud Scheduler 排程需要手動建立一次**（跟 `daily_report`/`chip_report` 一樣，GitHub Action
+只負責部署 function 本身，不建立/更新排程）：
 
 > ⚠️ 以下指令不會由 Claude 自動執行，僅供參考。
 
 ```bash
-gcloud functions deploy crawl-ptt-chat \
-  --gen2 \
-  --runtime=python314 \
-  --region=asia-east1 \
-  --source=. \
-  --entry-point=crawl_ptt_chat \
-  --trigger-http \
-  --no-allow-unauthenticated \
-  --set-env-vars=GCP_PROJECT_ID=your-project-id
+gcloud iam service-accounts create scheduler-invoker \
+  --display-name="Cloud Scheduler Function Invoker"
 
-gcloud functions add-invoker-policy-binding crawl-ptt-chat \
+gcloud functions add-invoker-policy-binding ptt-chat \
   --region=asia-east1 \
   --member="serviceAccount:scheduler-invoker@your-project-id.iam.gserviceaccount.com"
 
-PTT_CHAT_URL=$(gcloud functions describe crawl-ptt-chat --gen2 --region=asia-east1 --format='value(serviceConfig.uri)')
+PTT_CHAT_URL=$(gcloud functions describe ptt-chat --gen2 --region=asia-east1 --format='value(serviceConfig.uri)')
 
-gcloud scheduler jobs create http crawl-ptt-chat-job \
+gcloud scheduler jobs create http ptt-chat-job \
   --location=asia-east1 \
   --schedule="* * * * *" \
   --time-zone="Asia/Taipei" \
   --uri="$PTT_CHAT_URL" \
   --http-method=POST \
   --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com" \
-  --max-retry-attempts=3 \
+  --max-retry-attempts=1 \
   --min-backoff=30s
 ```
 
+沒有用 `1-5` 排除週末——PTT 板面本身沒有交易日限制，`resolve_current_session`/
+`resolve_session_date` 已經處理假日延續盤後閒聊的邏輯，排程本身不需要跳過假日。
+
 也需要把 [firestore.rules](../../firestore.rules) 裡新增的 `pttThreads` / `pttPosts` /
-`users/{uid}/setting/pttReadState`（文件名寫死，不開放同路徑下其他文件）規則部署到專案
-（`firebase deploy --only firestore:rules`）。
+`users/{uid}/setting/pttReadState`（文件名寫死，不開放同路徑下其他文件）規則部署到專案，
+在 GitHub Actions 手動觸發
+[.github/workflows/deploy-firebase-rules.yml](../../.github/workflows/deploy-firebase-rules.yml) 即可。
 
 ## 相關文件
 
