@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from google.cloud import firestore
 
 from firestore_writer import FirestoreWriter
+from timezone_utils import now_taipei
 
 Session = Literal["intraday", "afterhours"]
 
@@ -223,7 +224,7 @@ class PttChatCrawler:
         Returns:
             執行結果訊息
         """
-        now = now or datetime.now()
+        now = now or now_taipei()
         session = self.resolve_current_session(now)
         target_date = self.resolve_session_date(session, now)
         target_date_key = target_date.strftime("%Y%m%d")
@@ -280,7 +281,7 @@ class PttChatCrawler:
 
 def crawl_ptt_chat(request):
     """Cloud Functions HTTP entry point：由 Cloud Scheduler 每分鐘觸發"""
-    now = datetime.now()
+    now = now_taipei()
 
     try:
         firestore_writer = FirestoreWriter(project_id=os.getenv("GCP_PROJECT_ID", "demo-project"))
