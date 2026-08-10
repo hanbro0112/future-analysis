@@ -161,7 +161,7 @@ describe('PttChatWidget', () => {
     expect(image).toHaveAttribute('src', 'https://i.imgur.com/abc123.jpg');
   });
 
-  it('展開時若有下一則未讀訊息，改用手動定位 scrollTop 而不是把已讀訊息整則捲入視野', async () => {
+  it('展開時若已讀到中間（後面還有未讀訊息），用 scrollIntoView 捲到已讀訊息', async () => {
     mockGetPttReadState.mockResolvedValue(0); // 已讀到第 0 則，第 1 則是未讀
     mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
     const scrollIntoViewSpy = jest.spyOn(Element.prototype, 'scrollIntoView');
@@ -171,6 +171,23 @@ describe('PttChatWidget', () => {
     await screen.findByText('大家早安！');
     await waitFor(() => expect(mockGetPttReadState).toHaveBeenCalled());
 
+    expect(scrollIntoViewSpy).toHaveBeenCalled();
+
+    scrollIntoViewSpy.mockRestore();
+  });
+
+  it('無已讀紀錄時，展開後捲到頂端從第一則訊息開始，不使用 scrollIntoView', async () => {
+    mockGetPttReadState.mockResolvedValue(-1);
+    mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
+    const scrollIntoViewSpy = jest.spyOn(Element.prototype, 'scrollIntoView');
+
+    render(<PttChatWidget />);
+    expandWidget();
+    await screen.findByText('大家早安！');
+    await waitFor(() => expect(mockGetPttReadState).toHaveBeenCalled());
+
+    const list = screen.getByTestId('ptt-message-list');
+    expect(list.scrollTop).toBe(0);
     expect(scrollIntoViewSpy).not.toHaveBeenCalled();
 
     scrollIntoViewSpy.mockRestore();

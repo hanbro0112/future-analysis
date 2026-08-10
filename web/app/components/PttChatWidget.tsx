@@ -91,7 +91,7 @@ export default function PttChatWidget() {
     return subscribeToPttPosts(session, dateStr, setPosts);
   }, [uid, session, dateStr]);
 
-  // 每次展開時，重新捲動到上次已讀位置（若無記錄則捲到最新）
+  // 每次展開時，重新捲動到上次已讀位置（若無記錄則從第一則訊息開始）
   useEffect(() => {
     if (isOpen) {
       hasRestoredScrollRef.current = false;
@@ -104,22 +104,16 @@ export default function PttChatWidget() {
     const container = listRef.current;
     if (!container) return;
 
-    const targetIndex = lastReadIndex >= 0 && lastReadIndex < posts.length ? lastReadIndex : posts.length - 1;
-    const targetEl = container.querySelector<HTMLElement>(`[data-push-index="${targetIndex}"]`);
-    const nextUnreadEl =
-      targetIndex < posts.length - 1
-        ? container.querySelector<HTMLElement>(`[data-push-index="${targetIndex + 1}"]`)
-        : null;
-
-    if (nextUnreadEl) {
-      // 有新訊息時只露出下一則的一半，使用者要往下捲動看到完整內容才會更新讀取進度
-      const containerRect = container.getBoundingClientRect();
-      const nextRect = nextUnreadEl.getBoundingClientRect();
-      const nextTopInContent = nextRect.top - containerRect.top + container.scrollTop;
-      container.scrollTop = Math.max(0, nextTopInContent + nextRect.height / 2 - container.clientHeight);
-    } else {
-      targetEl?.scrollIntoView({ block: 'end' });
+    if (lastReadIndex < 0) {
+      // 無已讀紀錄，捲到頂端從第一則訊息開始閱讀
+      container.scrollTop = 0;
+      hasRestoredScrollRef.current = true;
+      return;
     }
+
+    const targetIndex = lastReadIndex < posts.length ? lastReadIndex : posts.length - 1;
+    const targetEl = container.querySelector<HTMLElement>(`[data-push-index="${targetIndex}"]`);
+    targetEl?.scrollIntoView({ block: 'end' });
     hasRestoredScrollRef.current = true;
   }, [isOpen, isReadStateLoaded, posts, lastReadIndex]);
 
