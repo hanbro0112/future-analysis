@@ -6,12 +6,13 @@ on:
       target:
         description: "選擇部署的 function"
         required: true
-        default: both
+        default: all
         type: choice
         options:
-          - both
+          - all
           - daily-report
           - chip-report
+          - ptt-chat
 
 # WIF 驗證需要讀取 OIDC ID Token 的權限
 permissions:
@@ -52,7 +53,7 @@ jobs:
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: 部署 daily-report
-        if: ${{ inputs.target == 'both' || inputs.target == 'daily-report' }}
+        if: ${{ inputs.target == 'all' || inputs.target == 'daily-report' }}
         run: |
           gcloud functions deploy daily-report \
             --gen2 \
@@ -72,7 +73,7 @@ jobs:
             --ingress-settings=internal-only
 
       - name: 部署 chip-report
-        if: ${{ inputs.target == 'both' || inputs.target == 'chip-report' }}
+        if: ${{ inputs.target == 'all' || inputs.target == 'chip-report' }}
         run: |
           gcloud functions deploy chip-report \
             --gen2 \
@@ -86,6 +87,25 @@ jobs:
             --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}" \
             --memory=512Mi \
             --timeout=30s \
+            --min-instances=0 \
+            --max-instances=1 \
+            --ingress-settings=internal-only
+
+      - name: 部署 ptt-chat
+        if: ${{ inputs.target == 'all' || inputs.target == 'ptt-chat' }}
+        run: |
+          gcloud functions deploy ptt-chat \
+            --gen2 \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --runtime=python314 \
+            --region="${{ env.REGION }}" \
+            --source=apps/functions \
+            --entry-point=crawl_ptt_chat \
+            --trigger-http \
+            --no-allow-unauthenticated \
+            --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}" \
+            --memory=512Mi \
+            --timeout=120s \
             --min-instances=0 \
             --max-instances=1 \
             --ingress-settings=internal-only

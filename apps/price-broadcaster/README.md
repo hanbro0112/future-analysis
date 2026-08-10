@@ -135,6 +135,7 @@ price-broadcaster/
 | `main.py` | 服務啟動入口，啟動 FastAPI/uvicorn |
 | `src/price_broadcaster/__init__.py` | FastAPI 應用主體：Pub/Sub 訂閱、每秒價格聚合與 WebSocket 廣播、`/health` 健康檢查 |
 | `src/price_broadcaster/auth.py` | 驗證前端 WebSocket 連線帶上的 Firebase ID Token（`firebase_admin.auth`），拒絕未登入連線 |
+| `src/price_broadcaster/__init__.py` 中的 `is_trading_hours()` | 以台北時間判斷是否為交易時段，非交易時段拒絕 WebSocket 連線（關閉代碼 `4403`） |
 | `test_ws_client.py` | 本地測試用 WebSocket 客戶端，接收並印出報價訊息 |
 
 ## 特性
@@ -144,6 +145,7 @@ price-broadcaster/
 - ✅ 自動累計每秒所有 tick 的成交量
 - ✅ 同一秒內多筆成交取最新價格
 - ✅ WebSocket 連接管理（自動清理斷開連接）
+- ✅ 非交易時段拒絕 WebSocket 連線（關閉代碼 `4403`）
 - ✅ CORS 支援（允許所有來源）
 - ✅ 健康檢查端點
 - ✅ 正確的服務關閉機制（清理所有背景任務）
@@ -154,3 +156,4 @@ price-broadcaster/
 2. **成交量計算**：每秒自動累計所有 tick 的 volume，下一秒重置
 3. **資料來源**：必須先啟動 `price-listener` 服務發送 tick 資料到 Pub/Sub
 4. **WebSocket 心跳**：客戶端應定期發送訊息以維持連接
+5. **交易時段限制**：非交易時段（日盤 8:45-13:45、夜盤 15:00-次日 5:00，週末休市）連線會被拒絕，關閉代碼為 `4403`

@@ -9,6 +9,7 @@ from google import genai
 from google.genai import types
 
 from firestore_writer import FirestoreWriter
+from timezone_utils import now_taipei
 
 
 class DailyReportGenerator:
@@ -92,7 +93,7 @@ class DailyReportGenerator:
         """
         # 預設為今天
         if target_date is None:
-            target_date = datetime.now()
+            target_date = now_taipei()
 
         # 確保目標日期是交易日
         if not self.is_trading_day(target_date):
@@ -130,7 +131,7 @@ class DailyReportGenerator:
                 "raw_content": raw_content,
                 "summary": {},  # 目前先留空，未來可以讓 Gemini 輸出結構化資料
                 "model_used": self.model_name,
-                "created_at": datetime.now().isoformat()
+                "created_at": now_taipei().isoformat()
             }
 
             return report_data
@@ -168,7 +169,7 @@ class DailyReportGenerator:
 
 def daily_report(request):
     """Cloud Functions HTTP entry point：由 Cloud Scheduler 觸發，產生並儲存每日市場分析報告"""
-    now = datetime.now()
+    now = now_taipei()
 
     try:
         report_generator = DailyReportGenerator()

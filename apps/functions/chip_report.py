@@ -15,6 +15,8 @@ from bs4 import BeautifulSoup
 import urllib3
 from google.cloud import storage
 
+from timezone_utils import now_taipei
+
 # 禁用 SSL 警告（因為目標網站 SSL 證書有問題）
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -271,7 +273,7 @@ class ChipReportProcessor:
             處理是否成功
         """
         if target_date is None:
-            target_date = datetime.now()
+            target_date = now_taipei()
 
         print(f"\n{'='*60}")
         print(f"📊 開始處理籌碼快訊 - {target_date.strftime('%Y-%m-%d')}")
@@ -327,7 +329,7 @@ def process_chip_report(target_date: Optional[datetime] = None, project_id: Opti
 
 def chip_report(request):
     """Cloud Functions HTTP entry point：由 Cloud Scheduler 觸發，處理籌碼快訊報告"""
-    now = datetime.now()
+    now = now_taipei()
 
     print(f"\n{'='*60}")
     print(f"📊 開始處理籌碼快訊 - {now.strftime('%Y-%m-%d %H:%M:%S')}")

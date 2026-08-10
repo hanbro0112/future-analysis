@@ -8,8 +8,9 @@
 | --- | --- | --- | --- |
 | `daily_report` | `daily_report.py` | 使用 Gemini API 分析台股/美股，寫入 Firestore `daily_reports/{YYYYMMDD}` | 每天 08:00（僅交易日執行，週末由程式內部判斷跳過） |
 | `chip_report` | `chip_report.py` | 抓取台指籌碼快訊 PDF，提取圖表上傳 Cloud Storage `chip-reports/{YYYYMMDD}/` | 每交易日 15:21 |
+| `crawl_ptt_chat` | `ptt_chat.py` | 抓取 PTT Stock 板盤中/盤後閒聊推文，寫入 Firestore `pttThreads`/`pttPosts` | 每分鐘（Cloud Scheduler 尚需手動建立，見下方部署說明） |
 
-兩個 function 都是 HTTP-triggered，`main.py` 匯入兩者供 `gcloud functions deploy --entry-point` 使用。
+三個 function 都是 HTTP-triggered，`main.py` 匯入供 `gcloud functions deploy --entry-point` 使用。
 
 ## 元件說明
 
@@ -19,6 +20,8 @@
 | `daily_report.py` | 呼叫 Gemini API 分析台股/美股市場，寫入 Firestore `daily_reports/{YYYYMMDD}`，內含 `is_trading_day` 交易日判斷 |
 | `chip_report.py` | 抓取台指籌碼快訊 PDF、裁切散戶多空比圖表，上傳 Cloud Storage `chip-reports/{YYYYMMDD}/` |
 | `README_CHIP_REPORT.md` | 籌碼快訊 PDF 裁切座標調整說明 |
+| `ptt_chat.py` | 抓取 PTT Stock 板盤中/盤後閒聊推文，寫入 Firestore `pttThreads`/`pttPosts` |
+| `README_PTT_CHAT.md` | PTT 閒聊功能說明、Firestore schema、部署方式 |
 
 ## 環境變數
 
@@ -41,16 +44,21 @@ uv run python test_daily_report.py --skip-save
 # 手動測試籌碼快訊
 uv run python test_chip_report.py
 
+# PTT 閒聊爬蟲：pytest 單元測試 + 手動觸發（詳見 README_PTT_CHAT.md）
+uv run pytest test_ptt_chat.py
+uv run python test_ptt_chat_manual.py
+
 # 用 functions-framework 本地啟動 HTTP server 測試
 uv run functions-framework --target=daily_report --debug
 uv run functions-framework --target=chip_report --debug
+uv run functions-framework --target=crawl_ptt_chat --debug
 ```
 
 ## 部署（GitHub Action，推薦）
 
-[.github/workflows/deploy-functions.yml](../../.github/workflows/deploy-functions.yml)
+[.github/workflows/deploy-cron-job.yml](../../.github/workflows/deploy-cron-job.yml)
 在 GitHub Actions 頁面手動觸發（`workflow_dispatch`），可選擇部署
-`both` / `daily-report` / `chip-report`。流程：
+`all` / `daily-report` / `chip-report` / `ptt-chat`。流程：
 
 1. 用 `uv export` 產生 `apps/functions` 專用的 `requirements.txt`（排除
    workspace 內的本地套件 `firestore-writer`）
@@ -107,6 +115,16 @@ gcloud functions deploy chip-report \
   --trigger-http \
   --no-allow-unauthenticated \
   --set-env-vars=GCP_PROJECT_ID=your-project-id
+
+gcloud functions deploy ptt-chat \
+  --gen2 \
+  --runtime=python314 \
+  --region=asia-east1 \
+  --source=. \
+  --entry-point=crawl_ptt_chat \
+  --trigger-http \
+  --no-allow-unauthenticated \
+  --set-env-vars=GCP_PROJECT_ID=your-project-id
 ```
 
 ### 2. 建立服務帳戶供 Cloud Scheduler 呼叫
@@ -122,6 +140,10 @@ gcloud functions add-invoker-policy-binding daily-report \
 gcloud functions add-invoker-policy-binding chip-report \
   --region=asia-east1 \
   --member="serviceAccount:scheduler-invoker@your-project-id.iam.gserviceaccount.com"
+
+gcloud functions add-invoker-policy-binding ptt-chat \
+  --region=asia-east1 \
+  --member="serviceAccount:scheduler-invoker@your-project-id.iam.gserviceaccount.com"
 ```
 
 ### 3. 建立 Cloud Scheduler 排程（OIDC 觸發）
@@ -129,6 +151,7 @@ gcloud functions add-invoker-policy-binding chip-report \
 ```bash
 DAILY_REPORT_URL=$(gcloud functions describe daily-report --gen2 --region=asia-east1 --format='value(serviceConfig.uri)')
 CHIP_REPORT_URL=$(gcloud functions describe chip-report --gen2 --region=asia-east1 --format='value(serviceConfig.uri)')
+PTT_CHAT_URL=$(gcloud functions describe ptt-chat --gen2 --region=asia-east1 --format='value(serviceConfig.uri)')
 
 gcloud scheduler jobs create http daily-report-job \
   --location=asia-east1 \
@@ -149,7 +172,21 @@ gcloud scheduler jobs create http chip-report-job \
   --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com" \
   --max-retry-attempts=3 \
   --min-backoff=600s
+
+gcloud scheduler jobs create http ptt-chat-job \
+  --location=asia-east1 \
+  --schedule="* * * * *" \
+  --time-zone="Asia/Taipei" \
+  --uri="$PTT_CHAT_URL" \
+  --http-method=POST \
+  --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com" \
+  --max-retry-attempts=1 \
+  --min-backoff=30s
 ```
+
+`ptt-chat-job` 沒有用 `1-5` 排除週末——PTT 板面本身沒有交易日限制，`ptt_chat.py`
+內部的 `resolve_current_session`/`resolve_session_date` 已經處理假日延續盤後閒聊的邏輯，
+排程本身不需要跳過假日。`--max-retry-attempts=1` 是因為每分鐘都會重新觸發，重試意義不大。
 
 Cron 排程已用 `1-5`（週一至週五）排除週末，`daily_report` 內部仍保留
 `is_trading_day` 判斷作為第二層保護；國定假日目前沒有排除，與拆分前行為一致。
@@ -161,3 +198,4 @@ HTTP 500，改由上方 `daily-report-job` 的 `--max-retry-attempts` / `--min-b
 ## 相關文件
 
 - [README_CHIP_REPORT.md](README_CHIP_REPORT.md) - 籌碼快訊裁切座標調整說明
+- [README_PTT_CHAT.md](README_PTT_CHAT.md) - PTT 閒聊功能說明、Firestore schema、部署方式

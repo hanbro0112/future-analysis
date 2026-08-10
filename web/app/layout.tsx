@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { AuthProvider } from "./lib/AuthContext";
+import PttChatWidget from "./components/PttChatWidget";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,7 +33,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-gray-50 dark:bg-gray-900 transition-colors">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            {children}
+            <PttChatWidget />
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

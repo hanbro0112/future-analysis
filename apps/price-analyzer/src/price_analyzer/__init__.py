@@ -22,12 +22,15 @@ from .minute_aggregator import MinuteAggregator, MinuteBar, SecondBar, now_taipe
 
 # ========== 獨立回調函數 ==========
 
+def _extract_base_code(code: str) -> str:
+    """移除合約月份，只保留商品類型（例如：MXFF6 -> MXF）"""
+    return code[:3] if len(code) >= 3 else code
+
+
 def on_minute_complete(minute_bar: MinuteBar, firestore_writer: FirestoreWriter, analyzer: LongShortAnalyzer):
     """當一分鐘的資料完成時，寫入 Firestore"""
     try:
-        # 取得商品代碼（移除合約月份，只保留商品類型）
-        # 例如：MXFF6 -> MXF
-        code = minute_bar.code[:3] if len(minute_bar.code) >= 3 else minute_bar.code
+        code = _extract_base_code(minute_bar.code)
         
         # 建立 Firestore 路徑：market/{code}/{YYYYMMDD}/{HHMM}
         collection_path = f"market/{code}/{minute_bar.date.replace('-', '')}"
@@ -73,8 +76,10 @@ def on_second_data_complete(second_bar: SecondBar, firestore_writer: FirestoreWr
     當一分鐘的秒級報價明細完成時寫入 Firestore（原 price-broadcaster 的每分鐘報價儲存邏輯）
     """
     try:
+        code = _extract_base_code(second_bar.code)
+
         # 建立 Firestore 路徑：market/{code}/{YYYYMMDD}_tick/{HHMM}
-        collection_path = f"market/{second_bar.code}/{second_bar.date}_tick"
+        collection_path = f"market/{code}/{second_bar.date}_tick"
 
         firestore_writer.write_document(
             collection=collection_path,
@@ -82,7 +87,7 @@ def on_second_data_complete(second_bar: SecondBar, firestore_writer: FirestoreWr
             document_id=second_bar.time
         )
 
-        print(f"💾 已儲存秒級報價: {second_bar.code}/{second_bar.date}_tick/{second_bar.time} "
+        print(f"💾 已儲存秒級報價: {code}/{second_bar.date}_tick/{second_bar.time} "
               f"(報價 {len(second_bar.prices)} 筆)")
 
     except Exception as e:
