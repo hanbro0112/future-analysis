@@ -34,9 +34,10 @@ api_instance: sj.Shioaji | None = None
 target_symbols = ["MXFR1"]
 is_reconnecting = False
 is_session_active = True  # 會話是否活躍
+is_subscribed = False  # 合約是否已成功訂閱（登入成功但合約清單尚未下載完成時會是 False）
 max_reconnect_attempts = 5
 reconnect_delay = 5  # 秒
-last_reconnect_time = None  # 上次重連時間
+last_reconnect_time = None  # 上次重連 / 重新訂閱時間
 
 
 def init_pubsub():
@@ -241,7 +242,7 @@ def on_event_universal(*args, **kwargs):
 
 def reconnect():
     """執行重連邏輯"""
-    global api_instance, is_reconnecting, is_session_active, last_reconnect_time
+    global api_instance, is_reconnecting, is_session_active, is_subscribed, last_reconnect_time
     
     for attempt in range(1, max_reconnect_attempts + 1):
         try:
@@ -275,8 +276,10 @@ def reconnect():
             
             # 重新訂閱合約
             print(f"   📡 重新訂閱合約...")
-            subscribe_contracts(api_instance)
-            
+            is_subscribed = subscribe_contracts(api_instance)
+            if not is_subscribed:
+                raise RuntimeError(f"合約訂閱失敗: {target_symbols}")
+
             print(f"✅ 第 {attempt} 次重連成功！")
             is_reconnecting = False
             is_session_active = True
@@ -301,50 +304,88 @@ def reconnect():
     return False
 
 
-def subscribe_contracts(api: sj.Shioaji):
-    """訂閱合約"""
+def subscribe_contracts(api: sj.Shioaji, max_attempts: int = 3, retry_delay: int = 5) -> bool:
+    """
+    訂閱合約，回傳是否全部訂閱成功。
+
+    登入後 Shioaji 合約清單是背景下載的，剛登入時查詢可能會拿到
+    'Contract not found'，因此查詢合約本身也需要重試幾次。
+
+    Returns:
+        True 代表 target_symbols 全部訂閱成功
+    """
+    all_success = True
+
     for code in target_symbols:
-        try:
-            contract = api.Contracts.Futures[code]
+        contract = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                contract = api.Contracts.Futures[code]
+            except Exception as e:
+                print(f"⚠️ 查詢合約 {code} 失敗（第 {attempt}/{max_attempts} 次）: {e}")
+                contract = None
+
             if contract:
-                print(f"📡 正在訂閱 {contract.code} ({contract.name})...")
-                api.quote.subscribe(
-                    contract, 
-                    quote_type=sj.constant.QuoteType.Tick,
-                    version=sj.constant.QuoteVersion.v1
-                )
-                print(f"✅ 訂閱成功: {contract.code}")
-            else:
-                print(f"❌ 找不到合約: {code}")
+                break
+
+            if attempt < max_attempts:
+                print(f"⚠️ 尚未取得合約 {code}（第 {attempt}/{max_attempts} 次），{retry_delay} 秒後重試...")
+                time.sleep(retry_delay)
+
+        if not contract:
+            print(f"❌ 找不到合約: {code}，已達最大重試次數")
+            all_success = False
+            continue
+
+        try:
+            print(f"📡 正在訂閱 {contract.code} ({contract.name})...")
+            api.quote.subscribe(
+                contract,
+                quote_type=sj.constant.QuoteType.Tick,
+                version=sj.constant.QuoteVersion.v1
+            )
+            print(f"✅ 訂閱成功: {contract.code}")
         except Exception as e:
             print(f"❌ 訂閱合約 {code} 失敗: {e}")
+            all_success = False
+
+    return all_success
 
 
 def check_and_reconnect():
     """
-    定期檢查連接狀態，在交易時段內且連接斷開時自動重連
+    定期檢查連接與訂閱狀態，在交易時段內自動修復：
+    - 連接已斷開：重新登入並訂閱（reconnect）
+    - 已登入但合約訂閱失敗（例如冷啟動時合約清單還沒下載完成）：重新訂閱
     """
-    global is_reconnecting, is_session_active, last_reconnect_time
-    
+    global is_reconnecting, is_session_active, is_subscribed, last_reconnect_time
+
     # 如果正在重連中，跳過
     if is_reconnecting:
         return
-    
-    # 如果連接正常，跳過
-    if is_session_active:
-        return
-    
+
     # 檢查是否在交易時段內
     now = now_taipei()
     if not is_trading_hours(now):
         return
-    
-    # 避免過於頻繁重連（至少間隔 30 秒）
+
+    # 避免過於頻繁重試（至少間隔 30 秒）
     if last_reconnect_time:
         elapsed = (now - last_reconnect_time).total_seconds()
         if elapsed < 30:
             return
-    
+
+    # 已登入但合約未訂閱成功：重新訂閱，不需要整個重新登入
+    if is_session_active and not is_subscribed:
+        print(f"\n🔔 [{now.strftime('%Y-%m-%d %H:%M:%S')}] 偵測到交易時段內合約尚未訂閱成功，重新訂閱...")
+        last_reconnect_time = now
+        is_subscribed = subscribe_contracts(api_instance)
+        return
+
+    # 連接正常且已訂閱，跳過
+    if is_session_active:
+        return
+
     print(f"\n🔔 [{now.strftime('%Y-%m-%d %H:%M:%S')}] 檢測到交易時段且連接已斷開，開始重連...")
     is_reconnecting = True
     reconnect()
@@ -382,7 +423,7 @@ def _handle_sigterm(signum: int, frame: object) -> None:
 
 
 def main() -> None:
-    global api_instance, is_session_active
+    global api_instance, is_session_active, is_subscribed
 
     threading.Thread(target=_start_health_check_server, daemon=True).start()
     signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -402,8 +443,10 @@ def main() -> None:
     print("✅ 事件處理器註冊完成（使用通用處理器進行調試）")
     
     # 訂閱合約
-    subscribe_contracts(api_instance)
-    
+    is_subscribed = subscribe_contracts(api_instance)
+    if not is_subscribed:
+        print(f"⚠️  合約訂閱未完全成功，交易時段內將由背景檢查自動重試")
+
     # 顯示交易時段資訊
     now = now_taipei()
     if is_trading_hours(now):

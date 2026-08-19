@@ -8,7 +8,8 @@
 - 過濾試撮（`simtrade`）資料，僅發布正式成交的 tick
 - 將 tick 展開為 Pub/Sub 訊息（`topic: price-updates`）發布
 - 斷線自動重連：偵測 Session down 事件，交易時段內以指數退避重試，最多 5 次
-- 定期（每 60 秒）背景檢查連線狀態，交易時段內斷線會自動觸發重連
+- 定期（每 60 秒）背景檢查連線與訂閱狀態，交易時段內斷線會自動觸發重連
+- 合約訂閱失敗自動重試：`subscribe_contracts` 內建重試（處理冷啟動時合約清單尚未下載完成），若仍失敗，交易時段內背景檢查會持續重新訂閱，不需整個重新登入
 - 內建極簡 HTTP health check server（`GET /` 回 200），供 Cloud Run 判斷服務存活
 - 收到 `SIGTERM`（Cloud Run 關閉 instance）或 `Ctrl+C` 時安全登出並印出 API 用量報告
 
@@ -24,7 +25,8 @@
 - `get_shioaji_client()`：登入 Shioaji API 並啟用 CA 憑證
 - `quote_callback(tick)`：tick 回調，轉換欄位並發布到 Pub/Sub
 - `is_trading_hours(check_time)`：判斷是否為日盤（08:45–13:45）或夜盤（15:00–次日 05:00）
-- `on_session_down` / `reconnect` / `check_and_reconnect`：斷線偵測與自動重連
+- `subscribe_contracts(api)`：訂閱合約，查詢合約清單失敗時會重試，回傳是否全部訂閱成功
+- `on_session_down` / `reconnect` / `check_and_reconnect`：斷線偵測與自動重連、合約訂閱失敗重試
 - `check_usage(api)`：登出前印出 Shioaji API 流量使用量
 
 ## 環境變數
