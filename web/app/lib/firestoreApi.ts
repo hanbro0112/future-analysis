@@ -373,8 +373,10 @@ export function subscribeToPttPosts(
 /**
  * PTT 閒聊個人設定文件路徑：users/{uid}/setting/pttReadState
  * 盤中/盤後的已讀位置與視窗大小都合併存在同一份文件裡，
- * 已讀位置用 intraday/afterhours 各自的巢狀欄位分開、用 dot-notation 局部更新，
+ * 已讀位置用 intraday/afterhours 各自的巢狀欄位分開、寫入時傳巢狀物件搭配 setDoc merge，
  * 不會互相覆蓋、也不會動到 width/height
+ * （注意：setDoc 的 key 不會像 updateDoc 一樣解析 dot-notation 字串路徑，
+ * 必須傳實際的巢狀物件，否則會寫成一個帶點的字面欄位名稱）
  */
 function getPttSettingDocRef(uid: string) {
   return doc(db, 'users', uid, 'setting', 'pttReadState');
@@ -426,7 +428,7 @@ export async function savePttReadState(
   try {
     await setDoc(
       getPttSettingDocRef(uid),
-      { [`${session}.date`]: date, [`${session}.last_read_index`]: lastReadIndex },
+      { [session]: { date, last_read_index: lastReadIndex } },
       { merge: true }
     );
   } catch (error) {

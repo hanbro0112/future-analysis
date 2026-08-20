@@ -132,7 +132,7 @@ describe('savePttReadState', () => {
     jest.clearAllMocks();
   });
 
-  it('用 dot-notation 局部更新對應 session 的欄位，不動到另一個 session 或視窗大小', async () => {
+  it('用巢狀物件搭配 merge 局部更新對應 session 的欄位，不動到另一個 session 或視窗大小', async () => {
     mockSetDoc.mockResolvedValue(undefined);
 
     await savePttReadState('uid-1', 'intraday', '20260806', 5);
@@ -140,7 +140,7 @@ describe('savePttReadState', () => {
     expect(mockDoc).toHaveBeenCalledWith({}, 'users', 'uid-1', 'setting', 'pttReadState');
     expect(mockSetDoc).toHaveBeenCalledWith(
       'fake-doc-ref',
-      { 'intraday.date': '20260806', 'intraday.last_read_index': 5 },
+      { intraday: { date: '20260806', last_read_index: 5 } },
       { merge: true }
     );
   });
