@@ -73,7 +73,7 @@ export default function LoginScreen() {
     <div className="flex min-h-screen w-full">
       {/* 左側：期貨風格插圖（手機隱藏，桌面顯示） */}
       {/* 圖片為橫幅構圖，面板多為直式比例，改用 object-contain 並以同色背景鋪底，避免左右內容被裁切 */}
-      <div className="relative hidden items-center justify-center overflow-hidden bg-[#f5f4f0] md:flex md:w-[46%] lg:w-[54%]">
+      <div className="relative hidden animate-fade-in-left items-center justify-center overflow-hidden bg-[#f5f4f0] md:flex md:w-[46%] lg:w-[54%]">
         <img
           src="/images/login-hero.jpg"
           alt=""
@@ -93,19 +93,28 @@ export default function LoginScreen() {
           {/* 中央登入區塊 */}
           <div className="flex items-center justify-center">
             <div className="w-full max-w-sm">
-              <span className="mb-4 inline-block h-1 w-10 rounded-full bg-gradient-to-r from-blue-500 via-emerald-500 to-amber-500" />
-              <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">
+              <span
+                className="mb-4 inline-block h-1 w-10 animate-fade-in-up rounded-full bg-gradient-to-r from-blue-500 via-emerald-500 to-amber-500"
+              />
+              <h1
+                className="animate-fade-in-up text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100"
+                style={{ animationDelay: '80ms' }}
+              >
                 歡迎回來
               </h1>
-              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+              <p
+                className="mt-2 animate-fade-in-up text-sm text-gray-500 dark:text-gray-400"
+                style={{ animationDelay: '140ms' }}
+              >
                 請登入以檢視即時報價與分析資料
               </p>
 
               <ul className="mt-8 space-y-1">
-                {FEATURES.map((feature) => (
+                {FEATURES.map((feature, index) => (
                   <li
                     key={feature.title}
-                    className="flex items-start gap-3 rounded-xl p-2 -mx-2 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                    className="flex animate-fade-in-up items-start gap-3 rounded-xl p-2 -mx-2 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                    style={{ animationDelay: `${220 + index * 80}ms` }}
                   >
                     <div
                       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${feature.colors.bg}`}
@@ -134,12 +143,16 @@ export default function LoginScreen() {
                 ))}
               </ul>
 
-              <div className="my-8 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent dark:via-gray-700" />
+              <div
+                className="my-8 h-px animate-fade-in-up bg-gradient-to-r from-transparent via-gray-200 to-transparent dark:via-gray-700"
+                style={{ animationDelay: '460ms' }}
+              />
 
               <button
                 onClick={handleSignIn}
                 disabled={isSigningIn}
-                className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-all hover:bg-gray-50 hover:shadow-md dark:hover:bg-gray-700 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+                className="flex w-full animate-fade-in-up items-center justify-center gap-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-all hover:bg-gray-50 hover:shadow-md dark:hover:bg-gray-700 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+                style={{ animationDelay: '520ms' }}
               >
                 <svg className="h-5 w-5" viewBox="0 0 24 24">
                   <path
@@ -163,13 +176,16 @@ export default function LoginScreen() {
               </button>
 
               {error && (
-                <p className="mt-4 text-sm text-red-500">{error}</p>
+                <p className="mt-4 animate-fade-in-up text-sm text-red-500">{error}</p>
               )}
             </div>
           </div>
 
           {/* 底部說明 */}
-          <p className="text-center text-xs text-gray-400 dark:text-gray-500">
+          <p
+            className="animate-fade-in-up text-center text-xs text-gray-400 dark:text-gray-500"
+            style={{ animationDelay: '600ms' }}
+          >
             台指期 · 即時報價與多空分析
           </p>
         </div>
