@@ -70,14 +70,13 @@ export default function LoginScreen() {
   };
 
   return (
-    <div className="flex min-h-screen w-full">
-      {/* 左側：期貨風格插圖（手機隱藏，桌面顯示） */}
-      {/* 圖片為橫幅構圖，面板多為直式比例，改用 object-contain 並以同色背景鋪底，避免左右內容被裁切 */}
-      <div className="relative hidden animate-fade-in-left items-center justify-center overflow-hidden bg-[#f5f4f0] md:flex md:w-[46%] lg:w-[54%]">
+    <div className="flex min-h-screen w-full flex-col md:flex-row">
+      {/* 頂部／左側：期貨風格插圖。手機版為橫幅（依圖片比例，不裁切），桌面版改為左右分割 */}
+      <div className="relative flex aspect-[1408/768] w-full animate-fade-in-left items-center justify-center overflow-hidden bg-[#f5f4f0] md:aspect-auto md:h-auto md:w-[46%] lg:w-[54%]">
         <img
           src="/images/login-hero.jpg"
           alt=""
-          className="h-full w-full object-contain"
+          className="h-full w-full object-cover md:object-contain"
         />
       </div>
 
