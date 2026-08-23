@@ -51,6 +51,7 @@ def on_minute_complete(minute_bar: MinuteBar, firestore_writer: FirestoreWriter,
                 'volume_explosion_level': analysis_result.volume_indicator.explosion_level,
                 'sentiment_label': analysis_result.sentiment_indicator.sentiment_label,
                 'sentiment_score': float(analysis_result.sentiment_indicator.sentiment_score),
+                'volatility': analysis_result.sentiment_indicator.volatility,
                 'basis': float(analysis_result.basis_analysis.basis),
                 'basis_pct': float(analysis_result.basis_analysis.basis_pct),
             }

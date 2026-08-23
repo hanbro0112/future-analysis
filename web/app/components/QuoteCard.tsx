@@ -66,6 +66,81 @@ function getSentimentColor(label: string): string {
   return 'text-gray-600';
 }
 
+/**
+ * 根據波動率決定操作建議與顏色：
+ * >= 50% 代表走勢來回震盪，適合低買高賣；< 50% 代表走勢單向，適合順勢操作
+ */
+function getVolatilityInfo(volatility: number): { label: string; color: string } {
+  if (volatility >= 50) return { label: '低買高賣', color: 'text-orange-600' };
+  return { label: '順勢', color: 'text-blue-600' };
+}
+
+/**
+ * 指標說明結構：用途、計算方式、分級門檻
+ */
+interface MetricInfo {
+  purpose: string;
+  formula: string;
+  levels: string[];
+}
+
+/**
+ * 各指標的用意與計算方式說明（參考 apps/price-analyzer/src/price_analyzer/STRATEGY_README.md）
+ */
+const METRIC_INFO: Record<'signal' | 'sentiment' | 'volumeExplosion' | 'basis' | 'volatility', MetricInfo> = {
+  signal: {
+    purpose: '綜合多空比判斷',
+    formula: '加權：1分鐘(25%) + 5分鐘(30%) + 30分鐘(20%) 價量趨勢 + 爆量指標(15%) + 期現價差(10%)',
+    levels: ['多方 ≥70%：強多', '≥58%：偏多', '42~58%：中性', '≤42%：偏空', '≤30%：強空'],
+  },
+  sentiment: {
+    purpose: '綜合情緒分數 (0-100)，反映市場貪婪／恐慌程度',
+    formula: '加權：委買委賣比(30%) + 連續內外盤方向(25%) + 動能分數(35%) + 波動率調整(10%)',
+    levels: ['≥75：極度貪婪', '≥60：貪婪', '45~55：一般', '≥25：恐慌', '<25：極度恐慌'],
+  },
+  volumeExplosion: {
+    purpose: '偵測成交量是否異常放大',
+    formula: '爆量比率 = 當前1分鐘成交量 ÷ 當日每分鐘平均成交量',
+    levels: ['≥3.0x：極度爆量', '≥2.0x：嚴重爆量', '≥1.5x：爆量', '≥1.2x：放量', '<1.2x：正常'],
+  },
+  basis: {
+    purpose: '期貨與現貨（加權指數）的價差，市場情緒的領先指標',
+    formula: '期現價差 = 期貨價格 − 現貨指數',
+    levels: ['正價差（期貨>現貨）：通常偏多', '逆價差（期貨<現貨）：通常偏空'],
+  },
+  volatility: {
+    purpose: '衡量短線走勢是單向趨勢還是來回震盪',
+    formula: '波動率 = (1 − 路徑效率比) × 100；路徑效率比(PER) = 1分鐘tick序列的「淨位移 ÷ 路徑總長」',
+    levels: ['≥50%：來回震盪，適合低買高賣', '<50%：走勢單向，適合順勢操作'],
+  },
+};
+
+/**
+ * 帶有滑鼠懸停說明的指標小標，說明分成用途／公式／分級門檻三段顯示
+ */
+function MetricLabel({ label, info, className = '' }: { label: string; info: MetricInfo; className?: string }) {
+  return (
+    <span className={`group relative inline-flex ${className}`}>
+      <span className="cursor-help border-b border-dotted border-gray-400 text-xs text-gray-500 dark:border-gray-500 dark:text-gray-400">
+        {label}
+      </span>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-0 z-20 mb-1 w-64 rounded-md bg-gray-800 p-3 text-xs text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 dark:bg-gray-900"
+      >
+        <p className="mb-1.5 font-semibold text-white">{label}</p>
+        <p className="mb-1.5 leading-relaxed text-gray-300">{info.purpose}</p>
+        <p className="mb-1.5 leading-relaxed text-gray-400">{info.formula}</p>
+        <ul className="space-y-0.5 border-t border-gray-700 pt-1.5 leading-relaxed text-gray-200">
+          {info.levels.map((level) => (
+            <li key={level}>{level}</li>
+          ))}
+        </ul>
+      </span>
+    </span>
+  );
+}
+
 const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected, isCurrentSession = true }: QuoteCardProps) => {
   // 追蹤更新時間
   const [updateTime, setUpdateTime] = useState<string>('');
@@ -259,7 +334,7 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
       {analysis && (
         <div className="mb-4 pt-4 border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500 dark:text-gray-400">多空信號</span>
+            <MetricLabel label="多空信號" info={METRIC_INFO.signal} />
             <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getSignalColor(analysis.signal)}`}>
               {analysis.signal}
             </span>
@@ -271,13 +346,13 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
       {analysis && (
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">市場情緒</p>
+            <MetricLabel label="市場情緒" info={METRIC_INFO.sentiment} className="mb-1" />
             <p className={`text-sm font-medium ${getSentimentColor(analysis.sentiment_label)}`}>
               {analysis.sentiment_label}
             </p>
           </div>
           <div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">成交量</p>
+            <MetricLabel label="成交量" info={METRIC_INFO.volumeExplosion} className="mb-1" />
             <p className="text-sm font-medium text-blue-600">
               {analysis.volume_explosion_level}
             </p>
@@ -285,19 +360,21 @@ const QuoteCard = ({ quote, realtimePrice, referencePrice, analysis, isConnected
         </div>
       )}
 
-      {/* 期現價差與價差信號 */}
+      {/* 期現價差與波動率 */}
       {basis != null && (
         <div className="grid grid-cols-2 gap-4 mb-4 pt-2 border-t border-gray-200 dark:border-gray-700">
           <div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">期現價差</p>
+            <MetricLabel label="期現價差" info={METRIC_INFO.basis} className="mb-1" />
             <p className={`text-sm font-medium ${basisColor}`}>
-              {basis > 0 ? '+' : ''}{basis.toFixed(0)}
+              {basis > 0 ? '+' : ''}{basis.toFixed(0)} ({basisSignal})
             </p>
           </div>
           <div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">價差信號</p>
-            <p className={`text-sm font-medium ${basisColor}`}>
-              {basisSignal}
+            <MetricLabel label="波動率" info={METRIC_INFO.volatility} className="mb-1" />
+            <p className={`text-sm font-medium ${analysis?.volatility != null ? getVolatilityInfo(analysis.volatility).color : 'text-gray-400'}`}>
+              {analysis?.volatility != null
+                ? `${analysis.volatility}% (${getVolatilityInfo(analysis.volatility).label})`
+                : '--'}
             </p>
           </div>
         </div>

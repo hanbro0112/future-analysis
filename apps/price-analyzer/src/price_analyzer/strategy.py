@@ -176,6 +176,7 @@ class SentimentIndicator:
     continuous_direction: int  # 連續方向 (正數=連續外盤, 負數=連續內盤)
     momentum_score: float  # 動能分數 (0-100, 50為中性)
     volatility_level: str  # 波動程度: "極低", "低", "正常", "高", "極高"
+    volatility: int  # 波動率 (0-100)，以路徑效率比 (Path Efficiency Ratio) 反轉計算：round((1 - PER) * 100)
     sentiment_score: float  # 綜合情緒分數 (0-100, >60貪婪, <40恐慌)
     sentiment_label: str  # 情緒標籤
     
@@ -335,6 +336,32 @@ class LongShortAnalyzer:
             basis_pct=basis_pct
         )
     
+    def _calculate_path_efficiency_ratio(self, ticks: deque) -> float:
+        """
+        計算路徑效率比 (Path Efficiency Ratio / Kaufman's Efficiency Ratio)
+
+        PER = 淨位移 / 路徑總長，範圍 0~1。
+        越接近 1 代表走勢單向、雜訊少；越接近 0 代表來回震盪、雜訊多。
+        路徑總長為 0（tick 數不足或價格完全沒變動）時視為無雜訊，回傳 1.0。
+
+        Args:
+            ticks: 時間視窗內依序排列的 tick 資料
+
+        Returns:
+            PER 數值 (0~1)
+        """
+        closes = [float(tick.close) for tick in ticks]
+        if len(closes) < 2:
+            return 1.0
+
+        net_change = abs(closes[-1] - closes[0])
+        path_length = sum(abs(closes[i] - closes[i - 1]) for i in range(1, len(closes)))
+
+        if path_length == 0:
+            return 1.0
+
+        return net_change / path_length
+
     def _calculate_sentiment(
         self,
         latest_tick: TickData,
@@ -395,7 +422,11 @@ class LongShortAnalyzer:
                 volatility_level = "低"
             else:
                 volatility_level = "極低"
-        
+
+        # 4-1. 波動率 (路徑效率比反轉，同樣使用 1 分鐘視窗的 tick 序列)
+        path_efficiency_ratio = self._calculate_path_efficiency_ratio(self.ticks_1min)
+        volatility = round((1 - path_efficiency_ratio) * 100)
+
         # 5. 綜合情緒分數
         scores = []
         
@@ -462,6 +493,7 @@ class LongShortAnalyzer:
             continuous_direction=continuous_direction,
             momentum_score=momentum_score,
             volatility_level=volatility_level,
+            volatility=volatility,
             sentiment_score=sentiment_score,
             sentiment_label=sentiment_label
         )
