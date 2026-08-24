@@ -1,5 +1,8 @@
 """
-測試市場情緒指標中，以路徑效率比 (Path Efficiency Ratio) 計算的波動率 (volatility)
+測試市場情緒指標中，改良自 Choppiness Index 計算的波動率 (volatility)
+
+重點：波動率必須只反映價格本身來回折返的程度，不能因為視窗內 tick 數量變多
+（取樣更密集）就跟著墊高。
 """
 import sys
 from pathlib import Path
@@ -37,41 +40,60 @@ def make_tick(dt: datetime, price: float) -> TickData:
     )
 
 
-def test_monotonic_trend_has_low_volatility():
-    """單向盤整（每筆都朝同一方向）：PER 應接近 1，volatility 應接近 0"""
+def _feed_ticks(prices: list[float]) -> float:
+    """依序餵入一串價格，回傳最後一筆的 volatility"""
     analyzer = LongShortAnalyzer()
     base_time = datetime(2026, 8, 24, 9, 0, 0)
 
     result = None
-    for i in range(10):
-        tick = make_tick(base_time + timedelta(seconds=i * 5), price=21800 + i)
+    for i, price in enumerate(prices):
+        tick = make_tick(base_time + timedelta(seconds=i), price=price)
         result = analyzer.analyze(tick)
 
     assert result is not None
-    assert result.sentiment_indicator.volatility < 5.0
+    return result.sentiment_indicator.volatility
 
 
-def test_oscillating_price_has_high_volatility():
-    """來回震盪（漲跌交替、淨位移趨近於 0）：PER 應接近 0，volatility 應接近 100"""
-    analyzer = LongShortAnalyzer()
-    base_time = datetime(2026, 8, 24, 9, 0, 0)
-
-    result = None
-    for i in range(10):
-        price = 21800 + (5 if i % 2 == 0 else -5)
-        tick = make_tick(base_time + timedelta(seconds=i * 5), price=price)
-        result = analyzer.analyze(tick)
-
-    assert result is not None
-    assert result.sentiment_indicator.volatility > 80.0
+def test_monotonic_trend_has_zero_volatility():
+    """單向盤整（每筆都朝同一方向，路徑總長 = 價格範圍）：volatility 應為 0"""
+    prices = [21800 + i for i in range(10)]
+    assert _feed_ticks(prices) == 0
 
 
-def test_single_tick_defaults_to_zero_volatility():
-    """視窗內只有一筆 tick（不足以構成路徑）時，volatility 應為 0（PER 視為 1.0）"""
-    analyzer = LongShortAnalyzer()
-    tick = make_tick(datetime(2026, 8, 24, 9, 0, 0), price=21800)
+def test_oscillating_price_has_max_volatility():
+    """在頭尾兩個極值間每筆都反轉：路徑總長遠大於價格範圍，volatility 應為 100"""
+    prices = [21800 + (5 if i % 2 == 0 else -5) for i in range(10)]
+    assert _feed_ticks(prices) == 100
 
-    result = analyzer.analyze(tick)
 
-    assert result is not None
-    assert result.sentiment_indicator.volatility == 0.0
+def test_volatility_unaffected_by_tick_count_when_oscillating():
+    """
+    同樣型態的來回震盪，tick 數從 10 筆增加到 40 筆，volatility 必須維持不變（都是 100），
+    不能因為取樣更密集就往上墊高——這是這次改版要修正的核心問題
+    """
+    prices_10 = [21800 + (5 if i % 2 == 0 else -5) for i in range(10)]
+    prices_40 = [21800 + (5 if i % 2 == 0 else -5) for i in range(40)]
+
+    assert _feed_ticks(prices_10) == 100
+    assert _feed_ticks(prices_40) == 100
+
+
+def test_volatility_unaffected_by_tick_count_when_trending():
+    """同樣是單向走勢，tick 數從 10 筆增加到 40 筆，volatility 應維持在 0"""
+    prices_10 = [21800 + i for i in range(10)]
+    prices_40 = [21800 + i for i in range(40)]
+
+    assert _feed_ticks(prices_10) == 0
+    assert _feed_ticks(prices_40) == 0
+
+
+def test_flat_price_has_zero_volatility():
+    """視窗內價格完全沒變動（價格範圍為 0）：volatility 應為 0，不會除以零"""
+    prices = [21800] * 5
+    assert _feed_ticks(prices) == 0
+
+
+def test_too_few_ticks_defaults_to_zero_volatility():
+    """視窗內少於 3 筆 tick（不足以構成有意義的路徑）：volatility 應為 0"""
+    assert _feed_ticks([21800]) == 0
+    assert _feed_ticks([21800, 21805]) == 0

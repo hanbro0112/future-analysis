@@ -109,8 +109,8 @@ const METRIC_INFO: Record<'signal' | 'sentiment' | 'volumeExplosion' | 'basis' |
     levels: ['正價差（期貨>現貨）：通常偏多', '逆價差（期貨<現貨）：通常偏空'],
   },
   volatility: {
-    purpose: '衡量短線走勢是單向趨勢還是來回震盪',
-    formula: '波動率 = (1 − 路徑效率比) × 100；路徑效率比(PER) = 1分鐘tick序列的「淨位移 ÷ 路徑總長」',
+    purpose: '衡量短線走勢是單向趨勢還是來回震盪，不受 tick 數量多寡影響',
+    formula: '改良自 Choppiness Index：100 × log10(路徑總長 ÷ 價格範圍) ÷ log10(tick 步數)',
     levels: ['≥50%：來回震盪，適合低買高賣', '<50%：走勢單向，適合順勢操作'],
   },
 };

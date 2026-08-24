@@ -72,7 +72,7 @@ describe('QuoteCard', () => {
     expect(tooltipTexts.some((text) => text?.includes('委買委賣比(30%)'))).toBe(true);
     expect(tooltipTexts.some((text) => text?.includes('爆量比率'))).toBe(true);
     expect(tooltipTexts.some((text) => text?.includes('期貨價格'))).toBe(true);
-    expect(tooltipTexts.some((text) => text?.includes('路徑效率比'))).toBe(true);
+    expect(tooltipTexts.some((text) => text?.includes('Choppiness Index'))).toBe(true);
   });
 
   it('懸停提示以用途、公式、分級門檻分段排版，而非單一長段落', () => {
