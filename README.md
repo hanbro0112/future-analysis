@@ -145,6 +145,7 @@ flowchart LR
 | Workflow | 部署對象 |
 | --- | --- |
 | [.github/workflows/deploy-apps.yml](.github/workflows/deploy-apps.yml) | 建置並部署 `price-listener` / `price-analyzer` / `price-broadcaster` 到 Cloud Run |
+| [.github/workflows/deploy-apps-gce.yml](.github/workflows/deploy-apps-gce.yml) | 建置並部署同三個服務到單一 GCE VM（Docker Compose + Caddy），與 Cloud Run 並存，詳見 [infra/gce/README.md](infra/gce/README.md) |
 | [.github/workflows/deploy-cron-job.yml](.github/workflows/deploy-cron-job.yml) | 部署 `daily-report` / `chip-report` 到 Cloud Functions |
 | [.github/workflows/deploy-firebase-rules.yml](.github/workflows/deploy-firebase-rules.yml) | 部署 Firestore / Storage 安全規則 |
 | [.github/workflows/deploy-web.yml](.github/workflows/deploy-web.yml) | 將 `web` 以 `next build` 靜態匯出後，透過 `wrangler-action` 部署到 **Cloudflare Pages**（project: `txfutures`） |

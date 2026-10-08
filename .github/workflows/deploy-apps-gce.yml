@@ -1,0 +1,89 @@
+name: Deploy Apps to GCE
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "選擇部署的服務"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - price-listener
+          - price-analyzer
+          - price-broadcaster
+
+# WIF 驗證需要讀取 OIDC ID Token 的權限
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  REGION: asia-east1
+  REPOSITORY: apps
+  VM_NAME: future-analysis-vm
+  VM_ZONE: asia-east1-b
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: 設定 Docker 對 Artifact Registry 的認證
+        run: gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
+
+      - name: 確保 Artifact Registry repository 存在
+        run: |
+          gcloud artifacts repositories describe "${{ env.REPOSITORY }}" \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --location="${{ env.REGION }}" \
+            || gcloud artifacts repositories create "${{ env.REPOSITORY }}" \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --location="${{ env.REGION }}" \
+            --repository-format=docker
+
+      - name: 建置並推送 price-listener
+        if: ${{ inputs.target == 'all' || inputs.target == 'price-listener' }}
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/price-listener:${{ github.sha }}"
+          docker build -f apps/price-listener/Dockerfile -t "$IMAGE" apps
+          docker push "$IMAGE"
+
+      - name: 建置並推送 price-analyzer
+        if: ${{ inputs.target == 'all' || inputs.target == 'price-analyzer' }}
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/price-analyzer:${{ github.sha }}"
+          docker build -f apps/price-analyzer/Dockerfile -t "$IMAGE" apps
+          docker push "$IMAGE"
+
+      - name: 建置並推送 price-broadcaster
+        if: ${{ inputs.target == 'all' || inputs.target == 'price-broadcaster' }}
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/price-broadcaster:${{ github.sha }}"
+          docker build -f apps/price-broadcaster/Dockerfile -t "$IMAGE" apps
+          docker push "$IMAGE"
+
+      - name: 上傳部署設定到 VM
+        run: |
+          gcloud compute scp --tunnel-through-iap --zone="${{ env.VM_ZONE }}" \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            infra/gce/docker-compose.yml infra/gce/Caddyfile infra/gce/deploy.sh \
+            "${{ env.VM_NAME }}:~/"
+
+      - name: 部署到 GCE VM
+        run: |
+          gcloud compute ssh --tunnel-through-iap --zone="${{ env.VM_ZONE }}" \
+            --project="${{ secrets.GCP_PROJECT_ID }}" "${{ env.VM_NAME }}" \
+            --command="sudo mkdir -p /opt/future-analysis && \
+              sudo mv ~/docker-compose.yml ~/Caddyfile ~/deploy.sh /opt/future-analysis/ && \
+              sudo bash /opt/future-analysis/deploy.sh ${{ github.sha }}"

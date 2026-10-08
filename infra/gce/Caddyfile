@@ -1,0 +1,10 @@
+# price-broadcaster 的 TLS 終止與反向代理設定
+# 憑證為 Cloudflare Origin CA 憑證（非 Let's Encrypt），
+# 因為 Cloudflare 走 Full (strict) 模式代理，只有 Cloudflare 邊緣會連到這裡。
+#
+# 若要換子網域，直接改下面這行即可。
+ws.txfutures.com {
+    tls /etc/caddy/certs/cf-origin.pem /etc/caddy/certs/cf-origin.key
+
+    reverse_proxy price-broadcaster:8080
+}
