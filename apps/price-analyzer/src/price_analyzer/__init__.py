@@ -5,19 +5,27 @@ Price Analyzer - 價格分析服務
 import os
 import signal
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # 添加 apps 目錄到 Python 路徑
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
 from config import config
-from pubsub import PubSubSubscriber
+from pubsub import PubSubPublisher, PubSubSubscriber
 from firestore_writer import FirestoreWriter
+from trading_calendar import ActiveWindow, ShouldContinue, run_session_loop
 from .strategy import LongShortAnalyzer, TickData
 from .minute_aggregator import MinuteAggregator, MinuteBar, SecondBar, now_taipei
+
+# 開盤前 5 分鐘就緒；收盤後多留 3 分鐘，讓最後一批 tick 消化完、分鐘與秒級資料都 flush 寫入
+ACTIVE_WINDOW = ActiveWindow(warmup=timedelta(minutes=5), grace=timedelta(minutes=3))
+
+# 收到 SIGTERM / SIGINT 時設定，讓每分鐘判斷的迴圈與目前時段一起結束
+stop_event = threading.Event()
 
 
 # ========== 獨立回調函數 ==========
@@ -225,69 +233,54 @@ def _start_health_check_server() -> None:
     server.serve_forever()
 
 
-def main() -> None:
-    """Price Analyzer 主程式"""
-    threading.Thread(target=_start_health_check_server, daemon=True).start()
+def stop_flush_timer(timer_lock: threading.Lock, timer_ref: dict) -> None:
+    """停止自動 flush 定時器，並等待正在執行的那一輪結束，避免跟收尾的 flush_all() 同時處理聚合器"""
+    with timer_lock:
+        timer = timer_ref.get('timer')
+        timer_ref['timer'] = None
 
+    if timer is not None:
+        timer.cancel()
+        if timer is not threading.current_thread():
+            timer.join(timeout=5)
+
+
+def flush_remaining(aggregator: MinuteAggregator) -> None:
+    """時段結束時完成所有未完成的分鐘與秒級資料"""
+    print("📦 正在完成剩餘的分鐘資料...")
+    aggregator.flush_all()
+
+
+def run_analyzer_session(should_continue: ShouldContinue) -> None:
+    """
+    執行一個交易時段：訂閱 tick、聚合並寫入 Firestore。
+
+    啟用窗口結束時會關閉訂閱、flush 剩餘資料並釋放連線；
+    訂閱失敗（重試用盡或不可重試的錯誤）會先完成同樣的收尾，再拋出例外交給時段迴圈重試。
+    """
     # 定時器控制（使用字典來保持可變引用）
-    flush_timer_ref = {'timer': None}
+    flush_timer_ref: dict = {'timer': None}
     timer_lock = threading.Lock()
+    watcher_stop = threading.Event()
 
-    try:
-        # 初始化 Firestore Writer
-        firestore_writer = FirestoreWriter(
-            project_id=config['gcp_project_id']
-        )
+    # 收尾動作依註冊順序的相反順序執行：
+    # 停止監看 -> 關閉訂閱（不再收新 tick）-> 停止定時器 -> flush 剩餘資料 -> 關閉 Firestore
+    with ExitStack() as cleanup:
+        firestore_writer = FirestoreWriter(project_id=config['gcp_project_id'])
+        cleanup.callback(firestore_writer.close)
 
         # 初始化多空比分析器
         analyzer = LongShortAnalyzer()
-        
+
         # 初始化分鐘聚合器（使用 lambda 綁定參數）
         aggregator = MinuteAggregator(
             on_minute_complete=lambda bar: on_minute_complete(bar, firestore_writer, analyzer),
             on_second_data_complete=lambda second_bar: on_second_data_complete(second_bar, firestore_writer),
         )
-        
-        # 取得 Pub/Sub 配置
-        topic_id = config['pubsub_topic_id']
-        subscription_id = config['pubsub_subscription_id_analyzer']
-        project_id = config['gcp_project_id']
-        
-        # 確保 Topic 存在（若無則自動創建）
-        from google.cloud.pubsub_v1 import PublisherClient
-        publisher_client = PublisherClient()
-        topic_path = publisher_client.topic_path(project_id, topic_id)
-        
-        try:
-            publisher_client.get_topic(request={"topic": topic_path})
-            print(f"✅ Topic 已存在: {topic_id}")
-        except Exception:
-            publisher_client.create_topic(request={"name": topic_path})
-            print(f"✅ Topic 已創建: {topic_id}")
-        
-        # 初始化 Pub/Sub Subscriber（會自動確保訂閱存在）
-        subscriber = PubSubSubscriber(
-            project_id=project_id,
-            subscription_id=subscription_id,
-            topic_id=topic_id
-        )
-
-        def _handle_sigterm(signum: int, frame: object) -> None:
-            # Cloud Run 關閉 instance 時送 SIGTERM；subscribe() 內部會吃掉 KeyboardInterrupt 但不會吃 SystemExit，
-            # 所以這裡用 sys.exit(0) 讓它正常往上傳，觸發下面的 finally 做關閉清理
-            print("\n\n🛑 收到 SIGTERM，開始關閉...")
-            # 先停止背景 auto-flush timer，避免跟這裡的 flush_all() 同時搶著處理 current_bars
-            with timer_lock:
-                if flush_timer_ref.get('timer') is not None:
-                    flush_timer_ref['timer'].cancel()
-                    flush_timer_ref['timer'] = None
-            print("📦 正在完成剩餘的分鐘資料...")
-            aggregator.flush_all()
-            sys.exit(0)
-
-        signal.signal(signal.SIGTERM, _handle_sigterm)
+        cleanup.callback(flush_remaining, aggregator)
 
         # 啟動自動 flush 定時器（每秒執行，同時負責秒級取樣與分鐘 OHLC 逾時保險 flush）
+        cleanup.callback(stop_flush_timer, timer_lock, flush_timer_ref)
         with timer_lock:
             flush_timer_ref['timer'] = threading.Timer(
                 1.0,
@@ -297,42 +290,68 @@ def main() -> None:
             flush_timer_ref['timer'].start()
             print("⏰ 自動 flush 定時器已啟動（每秒取樣並檢查一次）\n")
 
+        # 取得 Pub/Sub 配置
+        topic_id = config['pubsub_topic_id']
+        subscription_id = config['pubsub_subscription_id_analyzer']
+        project_id = config['gcp_project_id']
+
+        # 確保 Topic 存在（若無則自動創建）
+        publisher = PubSubPublisher(project_id=project_id)
+        try:
+            publisher.ensure_topic_exists(topic_id)
+        finally:
+            publisher.close()
+
+        # 初始化 Pub/Sub Subscriber（會自動確保訂閱存在）
+        subscriber = PubSubSubscriber(
+            project_id=project_id,
+            subscription_id=subscription_id,
+            topic_id=topic_id
+        )
+        cleanup.callback(subscriber.close)
+
+        # 啟用窗口結束（或服務要關閉）時關閉訂閱，讓下面阻塞的 subscribe() 返回
+        def watch_window() -> None:
+            while not watcher_stop.wait(1.0):
+                if not should_continue():
+                    print("🔔 啟用窗口結束，關閉訂閱...")
+                    subscriber.close()
+                    return
+
+        threading.Thread(target=watch_window, daemon=True).start()
+        cleanup.callback(watcher_stop.set)
 
         # 開始訂閱（阻塞式運行）
         print("🚀 Price Analyzer 已啟動（分鐘級聚合模式）\n")
         print("📊 資料結構：market/{商品代碼}/{YYYYMMDD}/{HHMM}\n")
         print("📊 秒級明細：market/{商品代碼}/{YYYYMMDD}_tick/{HHMM}\n")
-        
+
         # 訂閱訊息（使用 lambda 綁定參數）
         subscriber.subscribe(
             callback=lambda data: handle_message(data, analyzer, aggregator)
         )
-        
-    except KeyboardInterrupt:
-        print("\n\n👋 正在停止服務...")
-        # 停止定時器
-        with timer_lock:
-            if flush_timer_ref.get('timer') is not None:
-                flush_timer_ref['timer'].cancel()
-                flush_timer_ref['timer'] = None
-        # 強制完成所有未完成的分鐘資料
-        if 'aggregator' in locals():
-            print("📦 正在完成剩餘的分鐘資料...")
-            aggregator.flush_all()
-    except Exception as e:
-        print(f"\n❌ 發生錯誤: {e}")
-        sys.exit(1)
-    finally:
-        # 清理定時器
-        with timer_lock:
-            if flush_timer_ref.get('timer') is not None:
-                flush_timer_ref['timer'].cancel()
-        # 清理資源
-        if 'firestore_writer' in locals():
-            firestore_writer.close()
-        if 'subscriber' in locals():
-            subscriber.close()
-        print("✨ 服務已停止")
+
+
+def _handle_stop_signal(signum: int, frame: object) -> None:
+    """Cloud Run / Docker 關閉服務（SIGTERM）或 Ctrl+C（SIGINT）時，通知時段迴圈收尾並結束"""
+    print(f"\n\n🛑 收到訊號 {signum}，開始關閉...")
+    stop_event.set()
+
+
+def main() -> None:
+    """Price Analyzer 主程式：每分鐘判斷是否在啟用窗口，進入窗口就開始一個時段，收盤後收尾並回到待機"""
+    threading.Thread(target=_start_health_check_server, daemon=True).start()
+    signal.signal(signal.SIGTERM, _handle_stop_signal)
+    signal.signal(signal.SIGINT, _handle_stop_signal)
+
+    run_session_loop(
+        name="price-analyzer",
+        run_session=run_analyzer_session,
+        is_active_fn=ACTIVE_WINDOW.contains,
+        stop_event=stop_event,
+    )
+
+    print("✨ price-analyzer 已停止")
 
 
 __all__ = ["main"]

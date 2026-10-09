@@ -35,6 +35,10 @@ gcloud services enable \
 VM 上的服務靠這個帳號的 ADC 存取 Pub/Sub、Firestore、Secret Manager、Artifact Registry，
 不需要金鑰檔。
 
+> Pub/Sub 使用 `roles/pubsub.editor`：服務啟動時會 `get_topic` / `get_subscription`，
+> 不存在就自動建立。`pubsub.publisher` 只有發布權限、`pubsub.subscriber` 沒有 topic 的讀取與建立權限，
+> 搭配起來 `price-listener` 與 `price-analyzer` 會在啟動時 PermissionDenied。
+
 ```bash
 gcloud iam service-accounts create future-analysis-gce \
   --display-name="future-analysis GCE VM"
@@ -42,8 +46,7 @@ gcloud iam service-accounts create future-analysis-gce \
 for ROLE in \
   roles/secretmanager.secretAccessor \
   roles/artifactregistry.reader \
-  roles/pubsub.publisher \
-  roles/pubsub.subscriber \
+  roles/pubsub.editor \
   roles/datastore.user
 do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \

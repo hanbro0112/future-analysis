@@ -5,6 +5,7 @@ members = [
     "price-broadcaster",
     "libs/pubsub",
     "libs/firestore-writer",
+    "libs/trading-calendar",
     "price-broadcaster",
     "functions",
 ]

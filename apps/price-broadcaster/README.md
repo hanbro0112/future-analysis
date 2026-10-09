@@ -135,7 +135,8 @@ price-broadcaster/
 | `main.py` | 服務啟動入口，啟動 FastAPI/uvicorn |
 | `src/price_broadcaster/__init__.py` | FastAPI 應用主體：Pub/Sub 訂閱、每秒價格聚合與 WebSocket 廣播、`/health` 健康檢查 |
 | `src/price_broadcaster/auth.py` | 驗證前端 WebSocket 連線帶上的 Firebase ID Token（`firebase_admin.auth`），拒絕未登入連線 |
-| `src/price_broadcaster/__init__.py` 中的 `is_trading_hours()` | 以台北時間判斷是否為交易時段，非交易時段拒絕 WebSocket 連線（關閉代碼 `4403`） |
+| `src/price_broadcaster/__init__.py` 中的 `supervise_sessions()` | 時段監控：待機時每分鐘、時段進行中每秒判斷是否在啟用窗口（開盤前 5 分鐘到收盤，排除週末與國定假日，由 [libs/trading-calendar](../libs/trading-calendar/README.md) 提供），窗口內啟動廣播與 Pub/Sub 訂閱，收盤時中斷所有連線並清空報價快取 |
+| `src/price_broadcaster/__init__.py` 中的 `is_session_open()` 檢查 | WebSocket 連線時以台北時間判斷是否為交易時段，非交易時段拒絕連線（關閉代碼 `4403`） |
 | `test_ws_client.py` | 本地測試用 WebSocket 客戶端，接收並印出報價訊息 |
 
 ## 特性
@@ -146,6 +147,9 @@ price-broadcaster/
 - ✅ 同一秒內多筆成交取最新價格
 - ✅ WebSocket 連接管理（自動清理斷開連接）
 - ✅ 非交易時段拒絕 WebSocket 連線（關閉代碼 `4403`）
+- ✅ 收盤時主動以 `4403` 中斷所有已連線的客戶端，並清空最新報價，不會在收盤後繼續推送過期價格
+- ✅ Pub/Sub 訂閱在時段進行中失敗（重試用盡或不可重試的錯誤）時，會中斷連線（`1012`）並於下一分鐘重新訂閱，不會靜默停擺
+- ✅ 每個時段使用全新的 Pub/Sub 訂閱連線
 - ✅ CORS 支援（允許所有來源）
 - ✅ 健康檢查端點
 - ✅ 正確的服務關閉機制（清理所有背景任務）
@@ -156,4 +160,5 @@ price-broadcaster/
 2. **成交量計算**：每秒自動累計所有 tick 的 volume，下一秒重置
 3. **資料來源**：必須先啟動 `price-listener` 服務發送 tick 資料到 Pub/Sub
 4. **WebSocket 心跳**：客戶端應定期發送訊息以維持連接
-5. **交易時段限制**：非交易時段（日盤 8:45-13:45、夜盤 15:00-次日 5:00，週末休市）連線會被拒絕，關閉代碼為 `4403`
+5. **交易時段限制**：非交易時段（日盤 8:45-13:45、夜盤 15:00-次日 5:00，週末與國定假日休市）連線會被拒絕，關閉代碼為 `4403`；已連線的客戶端也會在收盤時被以 `4403` 中斷
+6. **健康檢查**：`/health` 的 `session_running` 為 `false` 代表目前不在啟用窗口（待機中）或正在等待重啟訂閱

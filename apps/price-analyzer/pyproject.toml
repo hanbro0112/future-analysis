@@ -8,6 +8,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "pubsub",
     "firestore-writer",
+    "trading-calendar",
     "tzdata>=2025.1",
 ]
 
@@ -17,3 +18,4 @@ start = "python main.py"
 [tool.uv.sources]
 pubsub = { workspace = true }
 firestore-writer = { workspace = true }
+trading-calendar = { workspace = true }

@@ -9,6 +9,8 @@ from typing import Optional, Dict, Callable, List
 from collections import defaultdict
 from zoneinfo import ZoneInfo
 
+from trading_calendar import is_session_open
+
 from .strategy import TickData
 
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
@@ -392,46 +394,8 @@ class MinuteAggregator:
             return 'regular'
 
     def _is_in_trading_hours(self, dt: datetime) -> bool:
-        """
-        判斷指定時間是否在交易時段內（原 price-broadcaster 邏輯，用於過濾秒級明細）
-
-        台指期交易時間：
-        - 日盤：週一至週五 08:45 - 13:45
-        - 夜盤：週一至週五 15:00 - 次日 05:00（週五夜盤延續至週六凌晨 05:00）
-        - 週六：00:00-05:00（週五夜盤延續），其餘時間不交易
-        - 週日：全天不交易
-
-        Args:
-            dt: 時間
-
-        Returns:
-            是否在交易時段
-        """
-        day = dt.weekday()  # 0 = 週一, 6 = 週日
-        hour = dt.hour
-        minute = dt.minute
-        time_in_minutes = hour * 60 + minute
-
-        day_session_start = 8 * 60 + 45  # 08:45
-        day_session_end = 13 * 60 + 45   # 13:45
-        night_session_start = 15 * 60    # 15:00
-        night_session_end = 5 * 60       # 05:00
-
-        # 週六：只有 00:00-05:00 算是週五夜盤的延續
-        if day == 5:
-            return time_in_minutes < night_session_end
-
-        # 週日：全天不交易
-        if day == 6:
-            return False
-
-        # 週一至週五
-        if day_session_start <= time_in_minutes <= day_session_end:
-            return True
-        if time_in_minutes >= night_session_start or time_in_minutes < night_session_end:
-            return True
-
-        return False
+        """判斷指定時間是否在交易時段內（含國定假日），用於過濾秒級明細"""
+        return is_session_open(dt)
 
     def should_flush(self, delay_minutes: float = 1.5) -> bool:
         """

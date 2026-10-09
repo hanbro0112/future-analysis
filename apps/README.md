@@ -16,13 +16,22 @@ apps/
 │   │       └── pubsub/
 │   │           ├── __init__.py
 │   │           └── client.py
-│   └── firestore-writer/   # Firestore 寫入模組
+│   ├── firestore-writer/   # Firestore 寫入模組
+│   │   ├── pyproject.toml
+│   │   ├── README.md
+│   │   └── src/
+│   │       └── firestore_writer/
+│   │           ├── __init__.py
+│   │           └── client.py
+│   └── trading-calendar/   # 交易日曆與服務生命週期模組
 │       ├── pyproject.toml
 │       ├── README.md
 │       └── src/
-│           └── firestore_writer/
+│           └── trading_calendar/
 │               ├── __init__.py
-│               └── client.py
+│               ├── sessions.py       # 交易日 / 交易時段 / 啟用窗口判斷
+│               ├── scheduler.py      # 每分鐘判斷是否啟用的 session 迴圈
+│               └── overrides.toml    # 休市日例外清單
 ├── price-listener/          # 價格監聽服務（Cloud Run）
 │   ├── main.py             # 啟動入口
 │   ├── pyproject.toml      # Package 配置
@@ -168,9 +177,20 @@ uv add package-name
   - `FirestoreWriter`: 寫入資料到 Firestore
   - 依賴：`google-cloud-firestore>=2.20.0`
 
+- **libs/trading-calendar** - 交易日曆與服務生命週期
+  - `is_session_open` / `is_trading_day`: 判斷交易時段與交易日（排除週末與國定假日）
+  - `ActiveWindow`: 開盤前預熱、收盤後緩衝的服務啟用窗口
+  - `run_session_loop`: 每分鐘判斷是否啟用，進入窗口就開始一個時段，收盤後收尾並回到待機
+  - 依賴：`holidays`
+
 所有專案都會自動將 workspace sources 加入 Python path。
 
 ## 服務說明
+
+### 時段生命週期（三個常駐服務共通）
+- 服務常駐運行，每分鐘依 [libs/trading-calendar](libs/trading-calendar/README.md) 判斷是否在啟用窗口（日盤／夜盤前 5 分鐘到收盤後緩衝，排除週末與國定假日）
+- 進入窗口才建立連線並開始工作；收盤後完整收尾（登出、flush、關閉訂閱、中斷連線）並回到待機，每個時段都是全新連線
+- 與部署環境無關，Cloud Run 與 GCE 皆適用；Cloud Run 的 `min-instances` 調整只是額外省成本，不再是服務正確運作的前提
 
 ### Price Listener（價格監聽服務）
 - 從外部 API 接收即時 tick 資料
@@ -181,7 +201,7 @@ uv add package-name
 - 訂閱 Pub/Sub 的 tick 資料
 - 分析價格並計算指標（如多空比）
 - 計算每分鐘 OHLCV 統計，並將分析結果儲存到 Firestore
-- 每秒取樣重建秒級報價明細（前向填充、跨分鐘/跨日連續性），儲存到 Firestore
+- 每秒取樣重建秒級報價明細（前向填充、跨分鐘連續性），儲存到 Firestore
 - 詳見：[price-analyzer/README.md](price-analyzer/src/price_analyzer/STRATEGY_README.md)
 
 ### Price Broadcaster（報價廣播服務）

@@ -17,6 +17,7 @@ Monorepo 包含一個前端專案與一組 Python 後端服務（Cloud Run + Clo
 | [apps/functions/](apps/functions) | 定時任務：每日 AI 市場分析（Gemini）、籌碼快訊圖表擷取 | [apps/functions/README.md](apps/functions/README.md) |
 | [apps/libs/pubsub/](apps/libs/pubsub) | 共用 Pub/Sub Publisher / Subscriber 模組 | [apps/libs/pubsub/README.md](apps/libs/pubsub/README.md) |
 | [apps/libs/firestore-writer/](apps/libs/firestore-writer) | 共用 Firestore 寫入模組 | [apps/libs/firestore-writer/README.md](apps/libs/firestore-writer/README.md) |
+| [apps/libs/trading-calendar/](apps/libs/trading-calendar) | 共用交易日曆（含國定假日）與「每分鐘判斷是否啟用」的服務生命週期迴圈 | [apps/libs/trading-calendar/README.md](apps/libs/trading-calendar/README.md) |
 
 三個 `apps/price-*` 服務與共用模組由同一個 `apps/` uv workspace 管理，詳見 [apps/README.md](apps/README.md)。
 
@@ -131,7 +132,7 @@ flowchart LR
 | **Cloud Run** | 執行 `price-listener` / `price-analyzer` / `price-broadcaster` 三個常駐服務，`asia-east1` |
 | **Cloud Functions (2nd gen)** | 執行 `daily-report` / `chip-report` 兩個定時觸發的任務 |
 | **Cloud Scheduler** | 1) 平日觸發 `daily-report`（08:00）與 `chip-report`（15:21）；2) 依日盤／夜盤時段觸發 GCP Workflow，動態調整三個 Cloud Run 服務的 `min-instances` |
-| **GCP Workflows**（GCP 端設定，非本 repo 程式碼） | 由 Cloud Scheduler 呼叫，負責在日盤（08:45–13:45）與夜盤（15:00–次日 05:00）開始前將 `price-listener` / `price-analyzer` / `price-broadcaster` 的 `min-instances` 調為 1，時段結束後調回 0，非交易時段不占用運行資源以節省成本 |
+| **GCP Workflows**（GCP 端設定，非本 repo 程式碼） | 由 Cloud Scheduler 呼叫，負責在日盤（08:45–13:45）與夜盤（15:00–次日 05:00）開始前將 `price-listener` / `price-analyzer` / `price-broadcaster` 的 `min-instances` 調為 1，時段結束後調回 0，非交易時段不占用運行資源以節省成本。三個服務本身也會依交易日曆（含國定假日）在啟用窗口外待機、窗口內重新建立連線，不依賴這個機制才能正確運作 |
 | **Pub/Sub** | `price-updates` topic，`price-analyzer` / `price-broadcaster` 各自以獨立 subscription 訂閱同一批逐筆報價 |
 | **Firestore** | 儲存分鐘級 OHLCV／多空分析（`market/{代碼}/{日期}/{HHmm}`）、秒級報價（`market/{代碼}/{日期}_tick/{HHmm}`）、每日 AI 報告（`daily_reports/{日期}`） |
 | **Cloud Storage** | 存放籌碼快訊裁切後的圖表（`chip-reports/{日期}/`） |
