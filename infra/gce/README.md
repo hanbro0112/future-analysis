@@ -146,7 +146,8 @@ ws.txfutures.com  A  <VM 外部 IP>  Proxied
 
 ## 8. 第一次部署
 
-到 GitHub Actions 手動觸發 `Deploy Apps to GCE` workflow（target 選 `all`）。
+到 GitHub Actions 手動觸發 `Deploy Apps to GCE` workflow。
+三個服務固定一起建置與部署（VM 上的 compose 共用同一個映像標籤，無法只部署其中一個）。
 完成後可用以下方式驗證：
 
 ```bash
@@ -161,3 +162,30 @@ gcloud compute ssh --tunnel-through-iap --zone="$ZONE" "$VM_NAME" \
 確認 GCE 版本運作穩定後，再把前端建置用的 `NEXT_PUBLIC_WS_URL` GitHub Secret
 改成 `wss://ws.txfutures.com`，重新跑 `Deploy Web to Cloudflare Pages` 切換流量。
 在那之前 `deploy-apps.yml`（Cloud Run）維持不動，兩者並存互不影響。
+
+## 部署注意事項
+
+### 避開交易時段部署
+
+三個服務在啟用窗口內（開盤前 5 分鐘到收盤後緩衝）會持續運作，部署會重啟它們，代價如下：
+
+- `price-listener` 重啟期間來源停止發布，這段時間的 tick **會遺失**。
+- `price-analyzer`、`price-broadcaster` 重啟期間的 tick 會留在 Pub/Sub，重啟後補送，不會遺失。
+- 重啟那一分鐘的分鐘文件會被覆蓋成只含重啟後的資料（Firestore 是覆蓋寫入），該分鐘的 OHLC 與成交量不完整。
+- 多空比等分析視窗（1／5／30 分鐘）與當日成交量均值會重新累積。
+
+建議在 **13:50 到 14:55 之間**（日盤收盤與夜盤預熱之間），或**週末與休市日**部署。
+
+### 服務重啟時的收尾
+
+`docker compose up -d` 重建容器時會先送 SIGTERM，listener 與 analyzer 設定了 30 秒停機寬限期
+（compose 預設只有 10 秒）：listener 要登出 Shioaji，沒登出會佔住連線數；analyzer 要把未完成的資料 flush 到 Firestore。
+
+### 修改 Caddyfile
+
+`Caddyfile` 是 bind mount，內容變更時 compose 不會自動重建容器。部署後需要在 VM 上手動套用：
+
+```bash
+gcloud compute ssh --tunnel-through-iap --zone="$ZONE" "$VM_NAME" \
+  --command="cd /opt/future-analysis && sudo docker compose restart caddy"
+```

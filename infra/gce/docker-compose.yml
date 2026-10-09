@@ -2,6 +2,8 @@ services:
   price-listener:
     image: ${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${REPOSITORY}/price-listener:${IMAGE_TAG}
     restart: unless-stopped
+    # 預設 10 秒就強制終止；收尾要登出 Shioaji，沒登出會佔住連線數
+    stop_grace_period: 30s
     env_file: .env
     volumes:
       - ./certs/ca.pfx:/secrets/ca.pfx:ro
@@ -14,6 +16,8 @@ services:
   price-analyzer:
     image: ${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${REPOSITORY}/price-analyzer:${IMAGE_TAG}
     restart: unless-stopped
+    # 預設 10 秒就強制終止；收尾要 flush 未完成的分鐘資料寫入 Firestore
+    stop_grace_period: 30s
     env_file: .env
     logging:
       driver: json-file
