@@ -393,7 +393,9 @@ def main() -> None:
         host="0.0.0.0",
         port=port,
         reload=False,
-        log_level="info"
+        log_level="info",
+        # 使用新版 sans-I/O 實作，避免 websockets legacy 在客戶端異常斷線時印出冗長 traceback
+        ws="websockets-sansio",
     )
 
 
