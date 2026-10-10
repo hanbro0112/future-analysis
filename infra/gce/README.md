@@ -12,8 +12,8 @@
 ```bash
 export PROJECT_ID="你的 GCP 專案 ID"          # 與 deploy-apps.yml 用的 GCP_PROJECT_ID 相同
 export REGION="asia-east1"
-export ZONE="asia-east1-b"
-export VM_NAME="future-analysis-vm"
+export ZONE="asia-east1-c"
+export VM_NAME="price-app"
 export VM_SA="future-analysis-gce@${PROJECT_ID}.iam.gserviceaccount.com"
 export DEPLOY_SA="現有 GitHub Actions WIF 用的 secrets.GCP_SERVICE_ACCOUNT"
 

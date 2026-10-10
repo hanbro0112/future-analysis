@@ -11,8 +11,8 @@ permissions:
 env:
   REGION: asia-east1
   REPOSITORY: apps
-  VM_NAME: future-analysis-vm
-  VM_ZONE: asia-east1-b
+  VM_NAME: price-app
+  VM_ZONE: asia-east1-c
 
 jobs:
   deploy:
