@@ -5,16 +5,21 @@ import shioaji as sj
 from shioaji import TickFOPv1
 import time
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # 添加 apps 目錄到 Python 路徑
 from config import config
 from pubsub import PubSubPublisher
+from trading_calendar import ActiveWindow, ShouldContinue, run_session_loop
 
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+
+# 開盤前 5 分鐘就緒（登入與下載合約清單需要時間），收盤後 1 分鐘才登出，讓最後的 tick 送完
+ACTIVE_WINDOW = ActiveWindow(warmup=timedelta(minutes=5), grace=timedelta(minutes=1))
 
 
 def now_taipei() -> datetime:
@@ -34,18 +39,24 @@ api_instance: sj.Shioaji | None = None
 target_symbols = ["MXFR1"]
 is_reconnecting = False
 is_session_active = True  # 會話是否活躍
+is_subscribed = False  # 合約是否已成功訂閱（登入成功但合約清單尚未下載完成時會是 False）
+is_stopping = False  # 本時段正在收尾，重連流程看到後要放棄
 max_reconnect_attempts = 5
 reconnect_delay = 5  # 秒
-last_reconnect_time = None  # 上次重連時間
+last_reconnect_time = None  # 上次重連 / 重新訂閱時間
+reconnect_thread: threading.Thread | None = None
+
+# 收到 SIGTERM 時設定，讓每分鐘判斷的迴圈與目前時段一起結束
+stop_event = threading.Event()
 
 
-def init_pubsub():
-    """初始化 Pub/Sub Publisher"""
+def init_pubsub() -> None:
+    """初始化 Pub/Sub Publisher；失敗時拋出例外，由時段迴圈在下一輪重試"""
     global pubsub_publisher
-    
+
     project_id = config["gcp_project_id"]
     topic_id = config["pubsub_topic_id"]
-    
+
     try:
         pubsub_publisher = PubSubPublisher(project_id=project_id)
         # 等待 topic 建立完成 - ensure_topic_exists() 是同步調用，會等待建立完成
@@ -53,51 +64,7 @@ def init_pubsub():
         print(f"✅ Pub/Sub 初始化成功，Topic: {topic_id}")
     except Exception as e:
         print(f"⚠️  Pub/Sub 初始化失敗: {e}")
-        exit(1)
-
-
-def is_trading_hours(check_time: datetime | None = None) -> bool:
-    """
-    判斷是否為交易時段
-    
-    交易時段：
-    - 日盤：週一到週五 8:45-13:45
-    - 夜盤：週一到週五 15:00-次日 5:00（週五夜盤延續至週六凌晨 5:00，週六、週日無新夜盤開盤）
-
-    Args:
-        check_time: 要檢查的時間，預設為當前時間
-
-    Returns:
-        True 如果在交易時段內
-    """
-    if check_time is None:
-        check_time = now_taipei()
-
-    weekday = check_time.weekday()  # 0=週一, 6=週日
-    hour = check_time.hour
-    minute = check_time.minute
-    time_minutes = hour * 60 + minute
-
-    # 凌晨 0:00-5:00：若前一天是週一到週五，屬於該日夜盤的延續
-    # （週五夜盤會延續到週六凌晨，因此週六 0:00-5:00 仍屬交易時段）
-    if time_minutes <= 5 * 60:
-        prev_weekday = (weekday - 1) % 7
-        if prev_weekday <= 4:
-            return True
-
-    # 週末（週六、週日）不會有新的日盤或夜盤開盤
-    if weekday >= 5:
-        return False
-
-    # 日盤：8:45-13:45
-    if 8 * 60 + 45 <= time_minutes <= 13 * 60 + 45:
-        return True
-
-    # 夜盤開盤：15:00 之後
-    if time_minutes >= 15 * 60:
-        return True
-
-    return False
+        raise
 
 
 def quote_callback(tick: TickFOPv1):
@@ -107,10 +74,14 @@ def quote_callback(tick: TickFOPv1):
     if tick.simtrade:
         # print("⚠️  試撮交易資料，跳過處理")
         return
-    
+
+    # 收尾後 Shioaji 可能還有殘留的 tick 回調，此時 publisher 已釋放
+    if pubsub_publisher is None:
+        return
+
     try:
         topic_id = config["pubsub_topic_id"]
-        
+
         # 準備訊息資料 - 展開 tick 物件的各個欄位
         message_data = {
             "code": tick.code,
@@ -156,17 +127,16 @@ def on_session_down(resp_code: int, event_code: int, info: str, event: str):
     - info: 錯誤訊息
     - event: 事件類型字串
     """
-    global is_reconnecting, is_session_active
-    
+    global is_reconnecting, is_session_active, reconnect_thread
+
     try:
         # 只處理 Session down 事件 (event_code == 1)
         if event_code != 1:
             print(f"ℹ️  收到事件: {event} (code: {event_code}, resp: {resp_code})")
             return
-        
-        is_session_active = False
+
         timestamp = now_taipei()
-        
+
         print(f"\n{'='*60}")
         print(f"⚠️ [{timestamp.strftime('%Y-%m-%d %H:%M:%S')}] 會話斷線事件觸發")
         print(f"{'='*60}")
@@ -175,20 +145,23 @@ def on_session_down(resp_code: int, event_code: int, info: str, event: str):
         print(f"事件類型: {event}")
         print(f"詳細訊息: {info}")
         print(f"{'='*60}\n")
-        
-        # 檢查是否在交易時段內
-        in_trading_hours = is_trading_hours(timestamp)
-        
-        if in_trading_hours and not is_reconnecting:
-            print("🔴 警告：交易時段內斷線，啟動重新連接...")
+
+        # 重連或收尾時我們自己會登出舊連線，它觸發的斷線事件不代表目前連線的狀態
+        if is_reconnecting or is_stopping:
+            print("ℹ️  正在重連或收尾中，忽略此斷線事件")
+            return
+
+        is_session_active = False
+
+        if ACTIVE_WINDOW.contains(timestamp):
+            print("🔴 警告：啟用時段內斷線，啟動重新連接...")
             is_reconnecting = True
             # 在單獨的線程中執行重連，避免阻塞事件處理
             reconnect_thread = threading.Thread(target=reconnect, daemon=True)
             reconnect_thread.start()
         else:
-            print("ℹ️  盤後時間斷線，將在下次交易時段開始前自動重連")
-            print("💤 進入待機模式，等待交易時段...")
-            
+            print("ℹ️  不在啟用時段，不重連（下個時段會重新登入）")
+
     except Exception as e:
         print(f"❌ on_session_down 處理錯誤: {e}")
         print(f"   參數: resp_code={resp_code}, event_code={event_code}, event={event}")
@@ -239,11 +212,27 @@ def on_event_universal(*args, **kwargs):
     print()
 
 
+def make_event_callback(api: sj.Shioaji) -> Callable[..., None]:
+    """建立綁定特定連線的事件回調；已被重連取代的舊連線所觸發的事件會被忽略"""
+    def callback(*args: object, **kwargs: object) -> None:
+        if api is not api_instance:
+            print("ℹ️  忽略已被取代的舊連線事件")
+            return
+        on_event_universal(*args, **kwargs)
+
+    return callback
+
+
 def reconnect():
     """執行重連邏輯"""
-    global api_instance, is_reconnecting, is_session_active, last_reconnect_time
-    
+    global api_instance, is_reconnecting, is_session_active, is_subscribed, last_reconnect_time
+
     for attempt in range(1, max_reconnect_attempts + 1):
+        if is_stopping or stop_event.is_set():
+            print("🛑 服務收尾中，放棄重連")
+            is_reconnecting = False
+            return False
+
         try:
             print(f"🔄 第 {attempt}/{max_reconnect_attempts} 次重連嘗試...")
             
@@ -271,12 +260,14 @@ def reconnect():
             
             # 註冊斷線事件處理
             print(f"   📝 註冊事件回調...")
-            api_instance.set_event_callback(on_event_universal)
-            
+            api_instance.set_event_callback(make_event_callback(api_instance))
+
             # 重新訂閱合約
             print(f"   📡 重新訂閱合約...")
-            subscribe_contracts(api_instance)
-            
+            is_subscribed = subscribe_contracts(api_instance)
+            if not is_subscribed:
+                raise RuntimeError(f"合約訂閱失敗: {target_symbols}")
+
             print(f"✅ 第 {attempt} 次重連成功！")
             is_reconnecting = False
             is_session_active = True
@@ -297,55 +288,91 @@ def reconnect():
     is_reconnecting = False
     is_session_active = False
     return False
-    is_session_active = False
-    return False
 
 
-def subscribe_contracts(api: sj.Shioaji):
-    """訂閱合約"""
+def subscribe_contracts(api: sj.Shioaji, max_attempts: int = 3, retry_delay: int = 5) -> bool:
+    """
+    訂閱合約，回傳是否全部訂閱成功。
+
+    登入後 Shioaji 合約清單是背景下載的，剛登入時查詢可能會拿到
+    'Contract not found'，因此查詢合約本身也需要重試幾次。
+
+    Returns:
+        True 代表 target_symbols 全部訂閱成功
+    """
+    all_success = True
+
     for code in target_symbols:
-        try:
-            contract = api.Contracts.Futures[code]
+        contract = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                contract = api.Contracts.Futures[code]
+            except Exception as e:
+                print(f"⚠️ 查詢合約 {code} 失敗（第 {attempt}/{max_attempts} 次）: {e}")
+                contract = None
+
             if contract:
-                print(f"📡 正在訂閱 {contract.code} ({contract.name})...")
-                api.quote.subscribe(
-                    contract, 
-                    quote_type=sj.constant.QuoteType.Tick,
-                    version=sj.constant.QuoteVersion.v1
-                )
-                print(f"✅ 訂閱成功: {contract.code}")
-            else:
-                print(f"❌ 找不到合約: {code}")
+                break
+
+            if attempt < max_attempts:
+                print(f"⚠️ 尚未取得合約 {code}（第 {attempt}/{max_attempts} 次），{retry_delay} 秒後重試...")
+                time.sleep(retry_delay)
+
+        if not contract:
+            print(f"❌ 找不到合約: {code}，已達最大重試次數")
+            all_success = False
+            continue
+
+        try:
+            print(f"📡 正在訂閱 {contract.code} ({contract.name})...")
+            api.quote.subscribe(
+                contract,
+                quote_type=sj.constant.QuoteType.Tick,
+                version=sj.constant.QuoteVersion.v1
+            )
+            print(f"✅ 訂閱成功: {contract.code}")
         except Exception as e:
             print(f"❌ 訂閱合約 {code} 失敗: {e}")
+            all_success = False
+
+    return all_success
 
 
 def check_and_reconnect():
     """
-    定期檢查連接狀態，在交易時段內且連接斷開時自動重連
+    定期檢查連接與訂閱狀態，在啟用時段內（含開盤前預熱）自動修復：
+    - 連接已斷開：重新登入並訂閱（reconnect）
+    - 已登入但合約訂閱失敗（例如冷啟動時合約清單還沒下載完成）：重新訂閱
     """
-    global is_reconnecting, is_session_active, last_reconnect_time
-    
-    # 如果正在重連中，跳過
-    if is_reconnecting:
+    global is_reconnecting, is_session_active, is_subscribed, last_reconnect_time
+
+    # 如果正在重連或收尾中，跳過
+    if is_reconnecting or is_stopping:
         return
-    
-    # 如果連接正常，跳過
-    if is_session_active:
-        return
-    
-    # 檢查是否在交易時段內
+
+    # 檢查是否在啟用時段內
     now = now_taipei()
-    if not is_trading_hours(now):
+    if not ACTIVE_WINDOW.contains(now):
         return
-    
-    # 避免過於頻繁重連（至少間隔 30 秒）
+
+    # 避免過於頻繁重試（至少間隔 30 秒）
     if last_reconnect_time:
         elapsed = (now - last_reconnect_time).total_seconds()
         if elapsed < 30:
             return
-    
-    print(f"\n🔔 [{now.strftime('%Y-%m-%d %H:%M:%S')}] 檢測到交易時段且連接已斷開，開始重連...")
+
+    # 已登入但合約未訂閱成功：重新訂閱，不需要整個重新登入
+    if is_session_active and not is_subscribed:
+        print(f"\n🔔 [{now.strftime('%Y-%m-%d %H:%M:%S')}] 偵測到啟用時段內合約尚未訂閱成功，重新訂閱...")
+        last_reconnect_time = now
+        is_subscribed = subscribe_contracts(api_instance)
+        return
+
+    # 連接正常且已訂閱，跳過
+    if is_session_active:
+        return
+
+    print(f"\n🔔 [{now.strftime('%Y-%m-%d %H:%M:%S')}] 檢測到啟用時段且連接已斷開，開始重連...")
     is_reconnecting = True
     reconnect()
 
@@ -368,88 +395,136 @@ def _start_health_check_server() -> None:
     server.serve_forever()
 
 
-def _handle_sigterm(signum: int, frame: object) -> None:
-    """Cloud Run 關閉 instance 時送 SIGTERM（不是 KeyboardInterrupt），這裡執行跟 Ctrl+C 一樣的清理流程"""
-    print("\n\n🛑 收到 SIGTERM，開始關閉...")
-    check_usage(api_instance)
-    print("👋 正在關閉連接...")
-    try:
-        api_instance.logout()
-        print("✅ 已安全登出")
-    except Exception:
-        pass
-    sys.exit(0)
+def start_listener_session() -> None:
+    """建立全新的 Pub/Sub 與 Shioaji 連線並訂閱合約（每個交易時段各一次）"""
+    global api_instance, is_session_active, is_subscribed, is_reconnecting, is_stopping, last_reconnect_time
 
-
-def main() -> None:
-    global api_instance, is_session_active
-
-    threading.Thread(target=_start_health_check_server, daemon=True).start()
-    signal.signal(signal.SIGTERM, _handle_sigterm)
+    is_stopping = False
+    is_reconnecting = False
+    last_reconnect_time = None
 
     init_pubsub()
-    
+
     api_instance = get_shioaji_client()
     is_session_active = True
-    
+
     # 註冊回調函數 - 必須在訂閱之前設定
     print("🔧 註冊報價回調函數...")
     api_instance.quote.set_on_tick_fop_v1_callback(quote_callback)
-    
+
     # 註冊會話斷線事件處理
     print("🔧 註冊會話事件處理器...")
-    api_instance.set_event_callback(on_event_universal)
+    api_instance.set_event_callback(make_event_callback(api_instance))
     print("✅ 事件處理器註冊完成（使用通用處理器進行調試）")
-    
+
     # 訂閱合約
-    subscribe_contracts(api_instance)
-    
-    # 顯示交易時段資訊
-    now = now_taipei()
-    if is_trading_hours(now):
-        print(f"\n✅ 當前為交易時段，開始監聽報價...")
-    else:
-        print(f"\nℹ️  當前為盤後時間，將在交易時段開始時自動監聽報價...")
-    
-    try:
-        check_counter = 0
-        while True:
-            time.sleep(1)
-            check_counter += 1
-            
-            # 每 60 秒檢查一次連接狀態
-            if check_counter >= 60:
-                check_counter = 0
-                check_and_reconnect()
-                
-    except KeyboardInterrupt:
-        print("\n\n🛑 收到退出信號...")
+    is_subscribed = subscribe_contracts(api_instance)
+    if not is_subscribed:
+        print(f"⚠️  合約訂閱未完全成功，啟用時段內將由背景檢查自動重試")
+
+
+def stop_listener_session() -> None:
+    """登出 Shioaji、釋放 Pub/Sub 連線，回到可重新開始的初始狀態"""
+    global api_instance, pubsub_publisher, is_session_active, is_subscribed, is_stopping
+
+    is_stopping = True
+
+    # 等重連執行緒放棄，避免它在我們登出後又建立新連線
+    if reconnect_thread is not None and reconnect_thread.is_alive() and reconnect_thread is not threading.current_thread():
+        reconnect_thread.join(timeout=30)
+
+    if api_instance is not None:
         check_usage(api_instance)
         print("👋 正在關閉連接...")
         try:
             api_instance.logout()
             print("✅ 已安全登出")
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️  登出失敗: {e}")
+
+    if pubsub_publisher is not None:
+        try:
+            pubsub_publisher.close()
+        except Exception as e:
+            print(f"⚠️  關閉 Pub/Sub Publisher 失敗: {e}")
+
+    api_instance = None
+    pubsub_publisher = None
+    is_session_active = False
+    is_subscribed = False
+
+
+def run_listener_session(should_continue: ShouldContinue) -> None:
+    """執行一個交易時段：連線、訂閱，每秒檢查是否該收尾，每 60 秒檢查連線狀態"""
+    try:
+        start_listener_session()
+
+        print("\n✅ 已就緒，開始監聽報價...")
+
+        check_counter = 0
+        while should_continue():
+            stop_event.wait(1)
+            check_counter += 1
+
+            # 每 60 秒檢查一次連接狀態
+            if check_counter >= 60:
+                check_counter = 0
+                check_and_reconnect()
+    finally:
+        stop_listener_session()
+
+
+def _handle_sigterm(signum: int, frame: object) -> None:
+    """Cloud Run / Docker 關閉服務時送 SIGTERM（不是 KeyboardInterrupt），通知時段迴圈收尾並結束"""
+    print("\n\n🛑 收到 SIGTERM，開始關閉...")
+    stop_event.set()
+
+
+def main() -> None:
+    threading.Thread(target=_start_health_check_server, daemon=True).start()
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
+    try:
+        run_session_loop(
+            name="price-listener",
+            run_session=run_listener_session,
+            is_active_fn=lambda: ACTIVE_WINDOW.contains(now_taipei()),
+            stop_event=stop_event,
+        )
+    except KeyboardInterrupt:
+        print("\n\n🛑 收到退出信號...")
+        stop_event.set()
+
+    print("👋 price-listener 已停止")
 
 
 def get_shioaji_client() -> sj.Shioaji:
     """初始化並登入 Shioaji API"""
     api = sj.Shioaji(simulation=True)
     print("🔌 正在連接 Shioaji API...")
-    api.login(
-        api_key=config["api_key"],
-        secret_key=config["secret_key"],
-    )
-    
-    # ca 憑證放在專案根目錄
-    project_root = Path(__file__).resolve().parents[4]
-    ca_path = str(project_root / config["ca_cert_path"])
-    
-    api.activate_ca(
-        ca_path= ca_path,
-        ca_passwd=config["ca_password"]
-    )
+
+    try:
+        api.login(
+            api_key=config["api_key"],
+            secret_key=config["secret_key"],
+        )
+
+        # ca 憑證放在專案根目錄
+        project_root = Path(__file__).resolve().parents[4]
+        ca_path = str(project_root / config["ca_cert_path"])
+
+        api.activate_ca(
+            ca_path= ca_path,
+            ca_passwd=config["ca_password"]
+        )
+    except Exception:
+        # 登入成功但後續步驟失敗時，要登出避免佔用連線數（時段迴圈每分鐘會重試）
+        try:
+            api.logout()
+        except Exception:
+            pass
+        raise
+
     print("✅ Shioaji API 登入成功")
     return api
 
@@ -457,9 +532,13 @@ def get_shioaji_client() -> sj.Shioaji:
 def check_usage(api: sj.Shioaji):
     """檢查 API 使用量並顯示剩餘額度百分比"""
     try:
-        # { connections=1, bytes, limit_bytes=500MB, remaining_bytes }
         usage = api.usage()
-        
+    except Exception as e:
+        print(f"❌ 取得 API 使用量失敗: {e}")
+        return
+
+    try:
+        # { connections=1, bytes, limit_bytes=500MB, remaining_bytes }
         # 提取 limit_bytes 和 remaining_bytes（物件屬性，不是字典）
         limit_bytes = usage.limit_bytes
         remaining_bytes = usage.remaining_bytes

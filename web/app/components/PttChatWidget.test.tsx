@@ -161,7 +161,7 @@ describe('PttChatWidget', () => {
     expect(image).toHaveAttribute('src', 'https://i.imgur.com/abc123.jpg');
   });
 
-  it('展開時若有下一則未讀訊息，改用手動定位 scrollTop 而不是把已讀訊息整則捲入視野', async () => {
+  it('展開時若已讀到中間（後面還有未讀訊息），用 scrollIntoView 捲到已讀訊息', async () => {
     mockGetPttReadState.mockResolvedValue(0); // 已讀到第 0 則，第 1 則是未讀
     mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
     const scrollIntoViewSpy = jest.spyOn(Element.prototype, 'scrollIntoView');
@@ -171,6 +171,49 @@ describe('PttChatWidget', () => {
     await screen.findByText('大家早安！');
     await waitFor(() => expect(mockGetPttReadState).toHaveBeenCalled());
 
+    expect(scrollIntoViewSpy).toHaveBeenCalled();
+
+    scrollIntoViewSpy.mockRestore();
+  });
+
+  it('展開當下已讀狀態尚未載入完成時不會誤判成無紀錄，載入完成後仍會用 scrollIntoView 捲到正確位置', async () => {
+    let resolveReadState: (index: number) => void = () => {};
+    mockGetPttReadState.mockReturnValue(
+      new Promise<number>((resolve) => {
+        resolveReadState = resolve;
+      })
+    );
+    mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
+    const scrollIntoViewSpy = jest.spyOn(Element.prototype, 'scrollIntoView');
+
+    render(<PttChatWidget />);
+    expandWidget();
+    await screen.findByText('大家早安！');
+
+    // 已讀狀態還沒從 Firestore 載入完成，不該預先判定成「無紀錄」而捲到頂端
+    expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+
+    resolveReadState(0); // 已讀到第 0 則，第 1 則是未讀
+
+    await waitFor(() => {
+      expect(scrollIntoViewSpy).toHaveBeenCalled();
+    });
+
+    scrollIntoViewSpy.mockRestore();
+  });
+
+  it('無已讀紀錄時，展開後捲到頂端從第一則訊息開始，不使用 scrollIntoView', async () => {
+    mockGetPttReadState.mockResolvedValue(-1);
+    mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
+    const scrollIntoViewSpy = jest.spyOn(Element.prototype, 'scrollIntoView');
+
+    render(<PttChatWidget />);
+    expandWidget();
+    await screen.findByText('大家早安！');
+    await waitFor(() => expect(mockGetPttReadState).toHaveBeenCalled());
+
+    const list = screen.getByTestId('ptt-message-list');
+    expect(list.scrollTop).toBe(0);
     expect(scrollIntoViewSpy).not.toHaveBeenCalled();
 
     scrollIntoViewSpy.mockRestore();

@@ -2,6 +2,7 @@
 多空比分析策略
 基於成交量、成交價、期現價差進行多空判斷
 """
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -176,6 +177,7 @@ class SentimentIndicator:
     continuous_direction: int  # 連續方向 (正數=連續外盤, 負數=連續內盤)
     momentum_score: float  # 動能分數 (0-100, 50為中性)
     volatility_level: str  # 波動程度: "極低", "低", "正常", "高", "極高"
+    volatility: int  # 波動率 (0-100)，改良自 Choppiness Index：100 * log10(路徑總長/價格範圍) / log10(步數)，不受 tick 數量影響
     sentiment_score: float  # 綜合情緒分數 (0-100, >60貪婪, <40恐慌)
     sentiment_label: str  # 情緒標籤
     
@@ -335,6 +337,42 @@ class LongShortAnalyzer:
             basis_pct=basis_pct
         )
     
+    def _calculate_choppiness_index(self, ticks: deque) -> float:
+        """
+        計算波動率：改良自 Choppiness Index（震盪指標，E.W. Dreiss 提出的經典技術指標）
+
+        CI = 100 * log10(路徑總長 / 價格範圍) / log10(tick 步數)
+
+        「路徑總長」是逐筆變動絕對值加總，「價格範圍」是視窗內最高減最低。
+        兩者相除代表「這段路徑來回走了幾倍的實際範圍」：完全單向移動時路徑總長等於
+        範圍，比值為 1；來回震盪越多次，比值越大。
+
+        這個比值本身也會隨 tick 數線性成長而失真（詳見先前 PER 版本的問題：路徑總長
+        隨取樣頻率近似線性發散），所以用 log10(步數) 當分母去抵銷，而不是用 sqrt(n)
+        這種只在特定雜訊分布假設下成立的近似修正。log10 成長極慢，效果是讓比值不會
+        單純因為 tick 變多而持續墊高分數，真正反映的是「相對於這一分鐘走過的範圍，
+        來回折返了多少次」，也就是數值本身的波動程度，而不是取樣密度。
+
+        Args:
+            ticks: 時間視窗內依序排列的 tick 資料
+
+        Returns:
+            波動率 (0~100)
+        """
+        closes = [float(tick.close) for tick in ticks]
+        steps = len(closes) - 1
+        if steps < 2:
+            return 0.0
+
+        path_length = sum(abs(closes[i] - closes[i - 1]) for i in range(1, len(closes)))
+        price_range = max(closes) - min(closes)
+
+        if price_range == 0 or path_length == 0:
+            return 0.0
+
+        ci = 100 * math.log10(path_length / price_range) / math.log10(steps)
+        return max(0.0, min(ci, 100.0))
+
     def _calculate_sentiment(
         self,
         latest_tick: TickData,
@@ -395,7 +433,10 @@ class LongShortAnalyzer:
                 volatility_level = "低"
             else:
                 volatility_level = "極低"
-        
+
+        # 4-1. 波動率 (Choppiness Index，同樣使用 1 分鐘視窗的 tick 序列)
+        volatility = round(self._calculate_choppiness_index(self.ticks_1min))
+
         # 5. 綜合情緒分數
         scores = []
         
@@ -462,6 +503,7 @@ class LongShortAnalyzer:
             continuous_direction=continuous_direction,
             momentum_score=momentum_score,
             volatility_level=volatility_level,
+            volatility=volatility,
             sentiment_score=sentiment_score,
             sentiment_label=sentiment_label
         )

@@ -40,8 +40,8 @@ export default function PttChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [session, setSession] = useState<PttSession>(() => getCurrentPttSession());
   const [posts, setPosts] = useState<PttPush[]>([]);
-  const [lastReadIndex, setLastReadIndex] = useState(-1);
-  const [isReadStateLoaded, setIsReadStateLoaded] = useState(false);
+  // null 代表尚未從 Firestore 載入完成，跟「已載入、確實無已讀紀錄」的 -1 分開表示，避免誤判
+  const [lastReadIndex, setLastReadIndex] = useState<number | null>(null);
   const [size, setSize] = useState({ width: DEFAULT_WIDTH_PX, height: DEFAULT_HEIGHT_PX });
 
   const listRef = useRef<HTMLDivElement>(null);
@@ -76,11 +76,9 @@ export default function PttChatWidget() {
     if (!uid) return;
 
     hasRestoredScrollRef.current = false;
-    setLastReadIndex(-1);
-    setIsReadStateLoaded(false);
+    setLastReadIndex(null);
     getPttReadState(uid, session, dateStr).then((index) => {
       setLastReadIndex(index);
-      setIsReadStateLoaded(true);
     });
   }, [uid, session, dateStr]);
 
@@ -91,7 +89,7 @@ export default function PttChatWidget() {
     return subscribeToPttPosts(session, dateStr, setPosts);
   }, [uid, session, dateStr]);
 
-  // 每次展開時，重新捲動到上次已讀位置（若無記錄則捲到最新）
+  // 每次展開時，重新捲動到上次已讀位置（若無記錄則從第一則訊息開始）
   useEffect(() => {
     if (isOpen) {
       hasRestoredScrollRef.current = false;
@@ -99,29 +97,23 @@ export default function PttChatWidget() {
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || !isReadStateLoaded || hasRestoredScrollRef.current || posts.length === 0) return;
+    if (!isOpen || lastReadIndex === null || hasRestoredScrollRef.current || posts.length === 0) return;
 
     const container = listRef.current;
     if (!container) return;
 
-    const targetIndex = lastReadIndex >= 0 && lastReadIndex < posts.length ? lastReadIndex : posts.length - 1;
-    const targetEl = container.querySelector<HTMLElement>(`[data-push-index="${targetIndex}"]`);
-    const nextUnreadEl =
-      targetIndex < posts.length - 1
-        ? container.querySelector<HTMLElement>(`[data-push-index="${targetIndex + 1}"]`)
-        : null;
-
-    if (nextUnreadEl) {
-      // 有新訊息時只露出下一則的一半，使用者要往下捲動看到完整內容才會更新讀取進度
-      const containerRect = container.getBoundingClientRect();
-      const nextRect = nextUnreadEl.getBoundingClientRect();
-      const nextTopInContent = nextRect.top - containerRect.top + container.scrollTop;
-      container.scrollTop = Math.max(0, nextTopInContent + nextRect.height / 2 - container.clientHeight);
-    } else {
-      targetEl?.scrollIntoView({ block: 'end' });
+    if (lastReadIndex < 0) {
+      // 無已讀紀錄，捲到頂端從第一則訊息開始閱讀
+      container.scrollTop = 0;
+      hasRestoredScrollRef.current = true;
+      return;
     }
+
+    const targetIndex = lastReadIndex < posts.length ? lastReadIndex : posts.length - 1;
+    const targetEl = container.querySelector<HTMLElement>(`[data-push-index="${targetIndex}"]`);
+    targetEl?.scrollIntoView({ block: 'end' });
     hasRestoredScrollRef.current = true;
-  }, [isOpen, isReadStateLoaded, posts, lastReadIndex]);
+  }, [isOpen, posts, lastReadIndex]);
 
   useEffect(() => {
     return () => {
@@ -180,7 +172,7 @@ export default function PttChatWidget() {
 
         if (hasNewVisible) {
           const index = maxVisibleIndexRef.current;
-          setLastReadIndex((prev) => (index > prev ? index : prev));
+          setLastReadIndex((prev) => (prev === null || index > prev ? index : prev));
           persistReadIndex(index);
         }
       },
@@ -235,7 +227,7 @@ export default function PttChatWidget() {
 
   if (!uid) return null;
 
-  const hasUnread = posts.length > 0 && lastReadIndex < posts.length - 1;
+  const hasUnread = posts.length > 0 && (lastReadIndex === null || lastReadIndex < posts.length - 1);
 
   if (!isOpen) {
     return (

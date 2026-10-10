@@ -167,11 +167,7 @@ export default function Home() {
   }
 
   if (!user) {
-    return (
-      <div className="flex min-h-screen flex-col bg-gray-50 dark:bg-gray-900">
-        <LoginScreen />
-      </div>
-    );
+    return <LoginScreen />;
   }
 
   return <Dashboard onSignOut={signOut} />;

@@ -15,6 +15,7 @@ export interface AnalysisResult {
   sentiment_score: number // 市場情緒分數
   basis: number // 期現價差
   basis_pct: number // 期現價差百分比
+  volatility: number // 波動率 (0-100)，路徑效率比 (PER) 反轉計算
 }
 
 /**

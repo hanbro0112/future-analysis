@@ -1,0 +1,59 @@
+services:
+  price-listener:
+    image: ${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${REPOSITORY}/price-listener:${IMAGE_TAG}
+    restart: unless-stopped
+    # 預設 10 秒就強制終止；收尾要登出 Shioaji，沒登出會佔住連線數
+    stop_grace_period: 30s
+    env_file: .env
+    volumes:
+      - ./certs/ca.pfx:/secrets/ca.pfx:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  price-analyzer:
+    image: ${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${REPOSITORY}/price-analyzer:${IMAGE_TAG}
+    restart: unless-stopped
+    # 預設 10 秒就強制終止；收尾要 flush 未完成的分鐘資料寫入 Firestore
+    stop_grace_period: 30s
+    env_file: .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  price-broadcaster:
+    image: ${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${REPOSITORY}/price-broadcaster:${IMAGE_TAG}
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs/cf-origin.pem:/etc/caddy/certs/cf-origin.pem:ro
+      - ./certs/cf-origin.key:/etc/caddy/certs/cf-origin.key:ro
+      - caddy_data:/data
+    depends_on:
+      - price-broadcaster
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:

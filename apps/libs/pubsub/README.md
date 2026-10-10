@@ -12,7 +12,9 @@
 - **PubSubSubscriber**: 訂閱並處理訊息
   - 串流拉取訊息
   - 自動 JSON 解析
-  - 錯誤處理和重試
+  - 暫時性錯誤（`ServiceUnavailable`、`DeadlineExceeded` 等）自動重建串流重試；權限不足、訂閱不存在等永久性錯誤直接拋出
+  - `max_retries` 計算「連續失敗」次數，串流穩定運作 60 秒以上才失敗會重新計算；用盡後拋出例外交給上層重啟
+  - `close()` 可重複呼叫，會讓阻塞中的 `subscribe()` 乾淨地返回（不拋例外）
 
 ## 使用方式
 

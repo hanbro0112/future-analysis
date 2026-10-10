@@ -25,3 +25,4 @@
 ## Commit Guidelines
 - 遵循 Conventional Commits 規範
 - commit 訊息格式：`{type}({scope}): {description}`
+- commit 訊息與 PR 說明**不要**加上 `Co-Authored-By: Claude ...` 這類 AI 署名行

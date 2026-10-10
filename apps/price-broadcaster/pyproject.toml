@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "python-dotenv>=1.2.2",
     "pubsub",
+    "trading-calendar",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "websockets>=13.0",
@@ -19,6 +20,7 @@ start = "python main.py"
 
 [tool.uv.sources]
 pubsub = { workspace = true }
+trading-calendar = { workspace = true }
 
 [dependency-groups]
 dev = [
