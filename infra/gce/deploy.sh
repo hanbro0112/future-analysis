@@ -17,14 +17,20 @@ fetch_secret() {
 
 mkdir -p "$APP_DIR/certs"
 
+# 先用變數取值：heredoc 內的 $(...) 失敗不會讓 set -e 中止，會把空值寫進 .env 後繼續往下跑。
+# 不要寫成 `local VAR=$(...)` 或 `export VAR=$(...)`，那會吃掉失敗狀態。
+API_KEY="$(fetch_secret shioaji-api-key)"
+SECRET_KEY="$(fetch_secret shioaji-secret-key)"
+CA_PASSWORD="$(fetch_secret shioaji-ca-password)"
+
 cat > "$APP_DIR/.env" <<ENV
 GCP_PROJECT_ID=${PROJECT_ID}
 PUBSUB_TOPIC_ID=price-updates
 PUBSUB_SUBSCRIPTION_ID_ANALYZER=price-analyzer-subscription
 PUBSUB_SUBSCRIPTION_ID_BROADCASTER=price-broadcaster-subscription
-API_KEY=$(fetch_secret shioaji-api-key)
-SECRET_KEY=$(fetch_secret shioaji-secret-key)
-CA_PASSWORD=$(fetch_secret shioaji-ca-password)
+API_KEY=${API_KEY}
+SECRET_KEY=${SECRET_KEY}
+CA_PASSWORD=${CA_PASSWORD}
 CA_CERT_PATH=/secrets/ca.pfx
 REGION=asia-east1
 REPOSITORY=apps
