@@ -1,6 +1,6 @@
 # Functions - 定時任務 Cloud Functions
 
-由 Cloud Scheduler + Cloud Functions (2nd gen) 執行，
+由 Cloud Scheduler + Cloud Functions (2nd gen) 以 HTTP 觸發執行，不屬於 GCE 上的常駐服務。
 
 ## 功能
 
@@ -16,7 +16,7 @@
 
 | 檔案 | 功用 |
 | --- | --- |
-| `main.py` | Cloud Functions 進入點，匯出 `daily_report` / `chip_report` 供部署指定 entry-point |
+| `main.py` | Cloud Functions 進入點，匯出 `daily_report` / `chip_report` / `crawl_ptt_chat` 供部署指定 entry-point |
 | `daily_report.py` | 呼叫 Gemini API 分析台股/美股市場，寫入 Firestore `daily_reports/{YYYYMMDD}`，內含 `is_trading_day` 交易日判斷 |
 | `chip_report.py` | 抓取台指籌碼快訊 PDF、裁切散戶多空比圖表，上傳 Cloud Storage `chip-reports/{YYYYMMDD}/` |
 | `README_CHIP_REPORT.md` | 籌碼快訊 PDF 裁切座標調整說明 |

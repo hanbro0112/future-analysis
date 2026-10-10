@@ -31,7 +31,7 @@
 ### 1. 安裝依賴
 
 ```bash
-pnpm install
+npm install
 ```
 
 ### 2. 配置環境變數
@@ -46,6 +46,13 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
 NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your-sender-id
 NEXT_PUBLIC_FIREBASE_APP_ID=your-app-id
+
+# price-broadcaster 的 WebSocket 位址（選填；本地預設 ws://localhost:8001，路徑 /ws/price 會自動補上）
+# GCE 正式環境為 wss://ws.txfutures.com
+NEXT_PUBLIC_WS_URL=ws://localhost:8001
+
+# 連線本機 Firebase Emulator（選填）
+NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true
 ```
 
 > **注意**: `.env.local` 已加入 `.gitignore`，請勿將此檔案提交到版本控制。
@@ -53,7 +60,7 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your-app-id
 ### 3. 啟動開發伺服器
 
 ```bash
-pnpm dev
+npm run dev
 ```
 
 開啟瀏覽器訪問 [http://localhost:3000](http://localhost:3000) 查看結果。
@@ -67,7 +74,7 @@ web/
 ├── app/
 │   ├── components/          # React 元件
 │   ├── lib/                 # Firebase 存取、WebSocket、工具函式
-│   ├── types/                # TypeScript 型別定義
+│   ├── types/               # TypeScript 型別定義（futures / minuteData / pttChat）
 │   ├── layout.tsx           # 根佈局
 │   ├── page.tsx             # 首頁
 │   └── globals.css          # 全域樣式
@@ -87,6 +94,7 @@ web/
 | `MinuteChart.tsx` | 分鐘級組合圖（均價折線 + 高低價虛線 + 成交量柱狀），支援日盤/夜盤資料切換與最新分析結果標色 |
 | `DailyAnalysisCard.tsx` | 顯示 Cloud Functions `daily-report` 產生的 Gemini AI 每日市場分析（Markdown 渲染） |
 | `ChipReportCard.tsx` | 顯示 Cloud Functions `chip-report` 產生、存於 Cloud Storage 的小台/微台散戶多空比圖表 |
+| `PttChatWidget.tsx` | 右下角彈窗，訂閱 Firestore 顯示 PTT Stock 板盤中/盤後閒聊推文，記錄已讀位置與視窗大小 |
 | `LoginScreen.tsx` | 未登入時顯示的登入畫面，提供 Google 登入按鈕 |
 | `ThemeProvider.tsx` | 包裝 `next-themes`，提供全站深色/淺色模式 context |
 | `ThemeToggle.tsx` | 深色/淺色模式切換按鈕 |
@@ -96,10 +104,11 @@ web/
 | 檔案 | 功用 |
 | --- | --- |
 | `firebase.ts` | Firebase App 初始化，匯出 `db` / `storage` / `auth`，支援連線本機 Emulator |
-| `firestoreApi.ts` | Firestore 資料存取層：讀取分鐘級期貨資料（`MinuteBar`）與每日 AI 分析報告 |
+| `firestoreApi.ts` | Firestore 資料存取層：讀取分鐘級期貨資料（`MinuteBar`）、每日 AI 分析報告，以及 PTT 閒聊推文與使用者已讀狀態 |
 | `AuthContext.tsx` | 以 React Context 管理 Firebase Auth 登入狀態，提供 `signInWithGoogle` / `signOut` |
 | `useWebSocket.ts` | 連線 `price-broadcaster` WebSocket 的 Hook，回傳即時報價、連線狀態、錯誤訊息，並依交易時段自動連線/斷線 |
 | `wsUrl.ts` | 將環境變數提供的 WebSocket 網址正規化（http→ws 轉換、補上 `/ws/price` 路徑） |
+| `pttSession.ts` / `pttContent.ts` | PTT 閒聊的盤中/盤後時段與日期判斷、推文內容解析（連結、圖片） |
 | `tradingHours.ts` | 判斷目前是否為交易時段（日盤/夜盤） |
 | `mockData.ts` | 開發期間用的模擬台指期資料產生器 |
 
@@ -133,7 +142,7 @@ service cloud.firestore {
 
 ### 初始化 Firestore
 
-專案已包含 Firestore 配置範例，請參考 `lib/firebase/config.ts`。
+Firebase 初始化集中在 `app/lib/firebase.ts`，設定來自上述環境變數。
 
 ---
 
@@ -164,13 +173,13 @@ service cloud.firestore {
 
 ```bash
 # 執行所有測試
-pnpm test
+npm test
 
 # 執行測試並生成覆蓋率報告
-pnpm test:coverage
+npm test -- --coverage
 
 # 監聽模式（開發時使用）
-pnpm test:watch
+npm run test:watch
 ```
 
 ---
@@ -179,15 +188,25 @@ pnpm test:watch
 
 ### 建置正式版本
 
+`next.config.ts` 設定 `output: "export"`，建置結果是靜態網站，輸出到 `out/`：
+
 ```bash
-pnpm build
+npm run build
 ```
 
 ### 本地預覽正式版本
 
+靜態匯出不支援 `next start`，請用任一靜態伺服器預覽 `out/`：
+
 ```bash
-pnpm start
+npx serve out
 ```
+
+### 部署到 Cloudflare Pages
+
+由 [.github/workflows/deploy-web.yml](../.github/workflows/deploy-web.yml) 手動觸發（`workflow_dispatch`）：`npm ci` → 以 GitHub Secrets 注入 `NEXT_PUBLIC_*` 環境變數並 `npm run build` → `wrangler pages deploy web/out --project-name=txfutures --branch=main`。
+
+`NEXT_PUBLIC_WS_URL` 在建置時寫入靜態檔，改 WebSocket 位址（例如切換後端部署目標）需要重新建置並部署前端。
 
 ## 📚 學習資源
 

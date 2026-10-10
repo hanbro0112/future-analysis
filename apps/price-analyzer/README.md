@@ -47,6 +47,9 @@ GCP_PROJECT_ID=demo-project
 PUBSUB_TOPIC_ID=price-updates
 PUBSUB_SUBSCRIPTION_ID_ANALYZER=price-analyzer-subscription
 
+# 健康檢查埠（選填，預設 8080）
+PORT=8080
+
 # Firestore Emulator (開發環境)
 FIRESTORE_EMULATOR_HOST=localhost:8080
 PUBSUB_EMULATOR_HOST=localhost:8085
@@ -65,5 +68,21 @@ uv sync
 
 ```bash
 cd apps
-uv run --package price-analyzer python -m price_analyzer.main
+uv run --package price-analyzer python -m price-analyzer.main
 ```
+
+## 部署
+
+### GCE（目前使用）
+
+由 [.github/workflows/deploy-apps-gce.yml](../../.github/workflows/deploy-apps-gce.yml) 建置 image 並推送到 Artifact Registry，再透過 IAP SSH 在 VM 上以 Docker Compose 重啟，設定見 [infra/gce/README.md](../../infra/gce/README.md)。
+
+- 與 price-listener、price-broadcaster 共用同一個 `IMAGE_TAG`，三個服務固定一起部署
+- 環境變數由 VM 上的 `deploy.sh` 寫入 `.env`；VM 的 service account 需要 `roles/datastore.user`（寫 Firestore）與 `roles/pubsub.editor`（訂閱不存在時自動建立）
+- 內建極簡 health check server（`GET /`，埠號取 `PORT`，預設 8080），供 Cloud Run 判斷存活；GCE 版本不對外開放
+- compose 設定 `stop_grace_period: 30s`，讓收到 `SIGTERM` 後有足夠時間 flush 未完成的分鐘與秒級資料
+- 重啟期間 tick 會留在 Pub/Sub，重啟後補送，但重啟那一分鐘的 OHLC 與成交量不完整，多空比分析視窗會重新累積，請避開交易時段部署
+
+### Cloud Run（舊版，歷史參考）
+
+由 [.github/workflows/deploy-apps.yml](../../.github/workflows/deploy-apps.yml) 部署（`--ingress=internal`）。
