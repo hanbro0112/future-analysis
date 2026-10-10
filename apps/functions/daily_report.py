@@ -28,7 +28,7 @@ class DailyReportGenerator:
 
         # 初始化 Gemini Client
         self.client = genai.Client(api_key=self.api_key)
-        self.model_name = 'gemini-3.5-flash'
+        self.model_name = 'gemini-3.6-flash'
 
     def is_trading_day(self, date: datetime) -> bool:
         """
