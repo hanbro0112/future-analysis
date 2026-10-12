@@ -38,7 +38,9 @@ IMAGE_TAG=${IMAGE_TAG}
 ENV
 chmod 600 "$APP_DIR/.env"
 
-fetch_secret shioaji-ca-cert > "$APP_DIR/certs/ca.pfx"
+# 憑證是二進位，必須用 --out-file；經 stdout 重導向會被當文字轉碼而損毀
+gcloud secrets versions access latest --secret=shioaji-ca-cert \
+  --project="$PROJECT_ID" --out-file="$APP_DIR/certs/ca.pfx"
 fetch_secret cf-origin-cert > "$APP_DIR/certs/cf-origin.pem"
 fetch_secret cf-origin-key > "$APP_DIR/certs/cf-origin.key"
 chmod 600 "$APP_DIR/certs/"*
