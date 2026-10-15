@@ -110,6 +110,7 @@ web/
 | `wsUrl.ts` | 將環境變數提供的 WebSocket 網址正規化（http→ws 轉換、補上 `/ws/price` 路徑） |
 | `pttSession.ts` / `pttContent.ts` | PTT 閒聊的盤中/盤後時段與日期判斷、推文內容解析（連結、圖片） |
 | `tradingHours.ts` | 判斷目前是否為交易時段（日盤/夜盤） |
+| `tradingCalendar.ts` / `tradingCalendar.data.json` | 交易日判斷（週末 + 國定假日），邏輯與後端 `trading-calendar` 的 `is_trading_day` 一致；休市日資料由後端匯出，部署時會自動重新匯出，本機可執行 `npm run export:calendar` |
 | `mockData.ts` | 開發期間用的模擬台指期資料產生器 |
 
 ---
@@ -204,7 +205,7 @@ npx serve out
 
 ### 部署到 Cloudflare Pages
 
-由 [.github/workflows/deploy-web.yml](../.github/workflows/deploy-web.yml) 手動觸發（`workflow_dispatch`）：`npm ci` → 以 GitHub Secrets 注入 `NEXT_PUBLIC_*` 環境變數並 `npm run build` → `wrangler pages deploy web/out --project-name=txfutures --branch=main`。
+由 [.github/workflows/deploy-web.yml](../.github/workflows/deploy-web.yml) 手動觸發（`workflow_dispatch`）：`npm ci` → 以 `uv` 重新匯出交易日曆休市日資料（`tradingCalendar.data.json`）→ 以 GitHub Secrets 注入 `NEXT_PUBLIC_*` 環境變數並 `npm run build` → `wrangler pages deploy web/out --project-name=txfutures --branch=main`。
 
 `NEXT_PUBLIC_WS_URL` 在建置時寫入靜態檔，改 WebSocket 位址（例如切換後端部署目標）需要重新建置並部署前端。
 

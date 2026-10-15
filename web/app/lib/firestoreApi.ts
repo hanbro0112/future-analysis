@@ -4,29 +4,12 @@
  */
 import { collection, query, orderBy, limit, getDocs, doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { db } from './firebase';
+import { getLastTradingDay } from './tradingCalendar';
 import type { MinuteBar } from '../types/minuteData';
 import type { PttPush, PttSession } from '../types/pttChat';
 
-/**
- * 獲取最近的交易日（排除週末）
- * @param date 基準日期
- * @returns 最近的交易日
- */
-export function getLastTradingDay(date: Date): Date {
-  const result = new Date(date);
-  const day = result.getDay();
-  
-  // 如果是週六，往前推到週五
-  if (day === 6) {
-    result.setDate(result.getDate() - 1);
-  }
-  // 如果是週日，往前推到週五
-  else if (day === 0) {
-    result.setDate(result.getDate() - 2);
-  }
-  
-  return result;
-}
+// 交易日判斷（含國定假日）集中在 tradingCalendar，這裡轉出以維持既有匯入路徑
+export { getLastTradingDay };
 
 /**
  * 取得指定日期的所有分鐘資料
@@ -127,7 +110,7 @@ export async function getTodayDaySession(symbol: string): Promise<MinuteBar[]> {
     dateForQuery.setDate(dateForQuery.getDate() - 1);
   }
   
-  // 確保日期是交易日（排除週末）
+  // 確保日期是交易日（排除週末與國定假日）
   dateForQuery = getLastTradingDay(dateForQuery);
   
   const dateStr = formatDateToYYYYMMDD(dateForQuery);
@@ -155,7 +138,7 @@ export async function getTodayNightSession(symbol: string): Promise<MinuteBar[]>
     dateForQuery.setDate(dateForQuery.getDate() - 1);
   }
   
-  // 確保日期是交易日（排除週末）
+  // 確保日期是交易日（排除週末與國定假日）
   dateForQuery = getLastTradingDay(dateForQuery);
   
   const dateStr = formatDateToYYYYMMDD(dateForQuery);
@@ -330,7 +313,7 @@ export async function getTodayDailyReport(): Promise<DailyReport | null> {
     dateForQuery.setDate(dateForQuery.getDate() - 1);
   }
   
-  // 確保日期是交易日（排除週末）
+  // 確保日期是交易日（排除週末與國定假日）
   dateForQuery = getLastTradingDay(dateForQuery);
   
   const dateStr = formatDateToYYYYMMDD(dateForQuery);

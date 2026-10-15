@@ -22,6 +22,14 @@ jobs:
       - name: 安裝相依套件
         run: npm ci
 
+      - name: 安裝 uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: 匯出交易日曆休市日資料
+        working-directory: apps
+        run: |
+          uv run --package trading-calendar python -m trading_calendar.export_calendar --output ../web/app/lib/tradingCalendar.data.json
+
       - name: 建置靜態網站
         env:
           NEXT_PUBLIC_FIREBASE_API_KEY: ${{ secrets.NEXT_PUBLIC_FIREBASE_API_KEY }}

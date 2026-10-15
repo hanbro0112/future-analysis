@@ -29,6 +29,7 @@ import {
   getTodayDailyReport,
   type DailyReport
 } from './lib/firestoreApi';
+import { isTradingDay } from './lib/tradingCalendar';
 import type { TaifexQuote } from './types/futures';
 import type { MinuteBar, MinuteChartPoint, AnalysisResult } from './types/minuteData';
 
@@ -40,27 +41,20 @@ const WS_URL = resolveWsUrl(process.env.NEXT_PUBLIC_WS_URL);
  * 根據當前時間判斷預設盤面類型（包含延後 3 分鐘以更新最後一筆資料）
  * - 日盤時段（週一至週五 08:45-13:48）=> 'regular'
  * - 夜盤時段（週一至週五 15:00-次日 05:03）=> 'after_hours'
- * - 週六全天 => 'after_hours'（顯示週五夜盤資料）
- * - 週日全天 => 'after_hours'（等待週日晚上夜盤開始）
+ * - 週六、週日與國定假日全天 => 'after_hours'（顯示前一交易日夜盤資料）
  */
 const getDefaultMarketType = (): 'regular' | 'after_hours' => {
   const now = new Date();
-  const day = now.getDay(); // 0 = 週日, 1 = 週一, ..., 6 = 週六
   const hours = now.getHours();
   const minutes = now.getMinutes();
   const totalMinutes = hours * 60 + minutes;
 
-  // 週六全天 => 夜盤
-  if (day === 6) {
+  // 週末與國定假日全天 => 夜盤
+  if (!isTradingDay(now)) {
     return 'after_hours';
   }
 
-  // 週日全天 => 夜盤
-  if (day === 0) {
-    return 'after_hours';
-  }
-
-  // 週一至週五判斷時間段
+  // 交易日判斷時間段
   // 日盤時段：08:45-13:48 (525-828 分鐘) - 延後 3 分鐘以更新最後一筆
   const daySessionStart = 8 * 60 + 45; // 525
   const daySessionEnd = 13 * 60 + 48; // 828 (原本 13:45 + 3 分鐘)

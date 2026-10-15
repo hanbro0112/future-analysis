@@ -182,6 +182,7 @@ uv add package-name
   - `is_session_open` / `is_trading_day`: 判斷交易時段與交易日（排除週末與國定假日）
   - `ActiveWindow`: 開盤前預熱、收盤後緩衝的服務啟用窗口
   - `run_session_loop`: 每分鐘判斷是否啟用，進入窗口就開始一個時段，收盤後收尾並回到待機
+  - `export_calendar`: 匯出休市日 JSON 給前端（`web/app/lib/tradingCalendar.data.json`）
   - 依賴：`holidays`
 
 所有專案都會自動將 workspace sources 加入 Python path。
