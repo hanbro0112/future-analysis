@@ -2,7 +2,8 @@
  * Firestore 資料存取層
  * 讀取分鐘級期貨資料與每日分析
  */
-import { collection, query, orderBy, limit, getDocs, doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import type { DocumentData } from 'firebase/firestore';
 import { db } from './firebase';
 import { getLastTradingDay } from './tradingCalendar';
 import type { MinuteBar } from '../types/minuteData';
@@ -10,6 +11,109 @@ import type { PttPush, PttSession } from '../types/pttChat';
 
 // 交易日判斷（含國定假日）集中在 tradingCalendar，這裡轉出以維持既有匯入路徑
 export { getLastTradingDay };
+
+type MarketType = 'regular' | 'after_hours';
+
+/** 日盤最後一根 K 棒的文件 ID，結算日提早於 13:30 收盤時改取 1329 */
+const DAY_SESSION_CLOSE_DOC_IDS = ['1344', '1329'] as const;
+
+/**
+ * 將 Firestore 文件轉成 MinuteBar
+ */
+function toMinuteBar(docData: DocumentData, docId: string, symbol: string, date: string): MinuteBar {
+  return {
+    code: docData.code || symbol,
+    timestamp: docData.timestamp,
+    date: docData.date || date,
+    time: docData.time || docId,
+    market_type: docData.market_type || 'regular',
+    open: docData.open || 0,
+    high: docData.high || 0,
+    low: docData.low || 0,
+    close: docData.close || 0,
+    volume: docData.volume || 0,
+    buy_volume: docData.buy_volume || 0,
+    sell_volume: docData.sell_volume || 0,
+    avg_price: docData.avg_price || 0,
+    tick_count: docData.tick_count || 0,
+    bid_total: docData.total_bid || 0,
+    ask_total: docData.total_ask || 0,
+    analysis: docData.analysis
+  };
+}
+
+/**
+ * 夜盤排序：15:00-23:59 在前，00:00-05:59（寫在同一天集合 time 最小處）排在後
+ */
+function compareNightTime(a: MinuteBar, b: MinuteBar): number {
+  const timeA = parseInt(a.time);
+  const timeB = parseInt(b.time);
+  const isEarlyA = timeA < 600;  // 00:00-05:59
+  const isEarlyB = timeB < 600;
+
+  if (isEarlyA && !isEarlyB) return 1;   // A 是凌晨，B 不是 -> A 排後面
+  if (!isEarlyA && isEarlyB) return -1;  // A 不是凌晨，B 是 -> A 排前面
+  return timeA - timeB;  // 同區段，按時間升序
+}
+
+/**
+ * 依盤別排序：日盤依 time 升序、夜盤依跨日規則；混合資料則日盤在前、夜盤在後
+ */
+export function sortMinuteBars(data: MinuteBar[]): MinuteBar[] {
+  const dayBars = data
+    .filter((bar) => bar.market_type === 'regular')
+    .sort((a, b) => parseInt(a.time) - parseInt(b.time));
+  const nightBars = data
+    .filter((bar) => bar.market_type === 'after_hours')
+    .sort(compareNightTime);
+  return [...dayBars, ...nightBars];
+}
+
+/**
+ * 將 Firestore Timestamp / Date / ISO 字串轉成 Date，無法辨識時回傳 null
+ */
+export function timestampToDate(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === 'string') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  if (value && typeof (value as { toDate?: unknown }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate();
+  }
+  return null;
+}
+
+/**
+ * 取得一批 K 棒中最新的 timestamp，作為增量查詢的游標
+ * （timestamp 為 K 棒真實時間，夜盤跨午夜後仍單調遞增，不受 time 欄位回捲影響）
+ */
+export function getLatestBarTimestamp(bars: MinuteBar[]): Date | null {
+  let latest: Date | null = null;
+  for (const bar of bars) {
+    const current = timestampToDate(bar.timestamp);
+    if (current && (!latest || current.getTime() > latest.getTime())) {
+      latest = current;
+    }
+  }
+  return latest;
+}
+
+/**
+ * 將增量資料合併進既有資料（同盤別 + time 相同者以新資料覆蓋），並重新排序
+ */
+export function mergeMinuteBars(existing: MinuteBar[], incoming: MinuteBar[]): MinuteBar[] {
+  const merged = new Map<string, MinuteBar>();
+  for (const bar of existing) {
+    merged.set(`${bar.market_type}|${bar.time}`, bar);
+  }
+  for (const bar of incoming) {
+    merged.set(`${bar.market_type}|${bar.time}`, bar);
+  }
+  return sortMinuteBars([...merged.values()]);
+}
 
 /**
  * 取得指定日期的所有分鐘資料
@@ -19,69 +123,27 @@ export { getLastTradingDay };
  * @returns 分鐘資料陣列
  */
 export async function getMinuteData(
-  symbol: string, 
-  date: string, 
-  marketType?: 'regular' | 'after_hours'
+  symbol: string,
+  date: string,
+  marketType?: MarketType
 ): Promise<MinuteBar[]> {
   try {
     const collectionPath = `market/${symbol}/${date}`;
-    // console.log(`📊 讀取 Firestore 路徑: ${collectionPath}`, marketType ? `盤別: ${marketType}` : '全部');
 
-    // 集合 ID 為日期（每天不同），不使用 where + orderBy 的複合查詢
-    // （否則每天都要重新建立 composite index），盤別改在讀取後於前端過濾
-    const q = query(
-      collection(db, collectionPath),
-      orderBy('time', 'asc')
-    );
+    // 指定盤別時用 where 等值條件只讀該盤別的文件（不搭配 orderBy，避免每天都要建立 composite index），
+    // 排序改在讀取後於前端處理；未指定盤別則維持整集合依 time 排序
+    const q = marketType
+      ? query(collection(db, collectionPath), where('market_type', '==', marketType))
+      : query(collection(db, collectionPath), orderBy('time', 'asc'));
 
     const querySnapshot = await getDocs(q);
-    let data: MinuteBar[] = [];
+    const data: MinuteBar[] = [];
 
     querySnapshot.forEach((docSnap) => {
-      const docData = docSnap.data();
-      data.push({
-        code: docData.code || symbol,
-        timestamp: docData.timestamp,
-        date: docData.date || date,
-        time: docData.time || docSnap.id,
-        market_type: docData.market_type || 'regular',
-        open: docData.open || 0,
-        high: docData.high || 0,
-        low: docData.low || 0,
-        close: docData.close || 0,
-        volume: docData.volume || 0,
-        buy_volume: docData.buy_volume || 0,
-        sell_volume: docData.sell_volume || 0,
-        avg_price: docData.avg_price || 0,
-        tick_count: docData.tick_count || 0,
-        bid_total: docData.total_bid || 0,
-        ask_total: docData.total_ask || 0,
-        analysis: docData.analysis
-      });
+      data.push(toMinuteBar(docSnap.data(), docSnap.id, symbol, date));
     });
 
-    if (marketType) {
-      data = data.filter((bar) => bar.market_type === marketType);
-    }
-
-    // 如果是夜盤資料，需要重新排序（15:00-23:59 在前，00:00-05:59 在後）
-    if (marketType === 'after_hours' && data.length > 0) {
-      data.sort((a, b) => {
-        const timeA = parseInt(a.time);
-        const timeB = parseInt(b.time);
-        
-        // 夜盤邏輯：15:00-23:59 (900-1439) 排在前，00:00-05:59 (0-359) 排在後
-        const isEarlyA = timeA < 600;  // 00:00-05:59
-        const isEarlyB = timeB < 600;
-        
-        if (isEarlyA && !isEarlyB) return 1;   // A 是凌晨，B 不是 -> A 排後面
-        if (!isEarlyA && isEarlyB) return -1;  // A 不是凌晨，B 是 -> A 排前面
-        return timeA - timeB;  // 同區段，按時間升序
-      });
-    }
-    
-    // console.log(`✅ 讀取成功: ${data.length} 筆資料`);
-    return data;
+    return marketType ? sortMinuteBars(data) : data;
   } catch (error) {
     console.error('❌ 讀取分鐘資料失敗:', error);
     if (error instanceof Error) {
@@ -92,29 +154,87 @@ export async function getMinuteData(
 }
 
 /**
+ * 增量讀取：只取 timestamp 大於等於游標的新資料
+ *
+ * 使用 timestamp（K 棒真實時間）而非 time 當游標：夜盤過 00:00 的資料寫在前一天集合、
+ * time 會排到集合最前面，但 timestamp 仍依真實時序遞增，所以不會取回整個集合。
+ * 取「大於等於」是為了多讀游標那一筆（約 1 筆），避免最後一根 K 棒事後被更新或延遲寫入而漏掉。
+ * 盤別在前端過濾（where 搭配 timestamp 範圍需要 composite index），增量資料量很小。
+ *
+ * @param symbol 商品代碼
+ * @param date 日期 (格式: YYYYMMDD)，即集合 ID
+ * @param after 游標時間（通常為已載入資料中最新一筆的 timestamp）
+ * @param marketType 盤別過濾
+ * @returns 新增（或被更新）的分鐘資料，讀取失敗回傳空陣列
+ */
+export async function getMinuteDataAfter(
+  symbol: string,
+  date: string,
+  after: Date,
+  marketType?: MarketType
+): Promise<MinuteBar[]> {
+  try {
+    const q = query(
+      collection(db, `market/${symbol}/${date}`),
+      where('timestamp', '>=', after),
+      orderBy('timestamp', 'asc')
+    );
+
+    const querySnapshot = await getDocs(q);
+    const data: MinuteBar[] = [];
+
+    querySnapshot.forEach((docSnap) => {
+      data.push(toMinuteBar(docSnap.data(), docSnap.id, symbol, date));
+    });
+
+    return marketType ? data.filter((bar) => bar.market_type === marketType) : data;
+  } catch (error) {
+    console.error('❌ 增量讀取分鐘資料失敗:', error);
+    return [];
+  }
+}
+
+/**
+ * 取得日盤的查詢日期 (YYYYMMDD)：08:30 前使用前一天，並排除週末與國定假日
+ */
+export function getDaySessionDate(now: Date = new Date()): string {
+  const timeInMinutes = now.getHours() * 60 + now.getMinutes();
+
+  let dateForQuery = now;
+  if (timeInMinutes < 8 * 60 + 30) {
+    dateForQuery = new Date(now);
+    dateForQuery.setDate(dateForQuery.getDate() - 1);
+  }
+
+  return formatDateToYYYYMMDD(getLastTradingDay(dateForQuery));
+}
+
+/**
+ * 取得夜盤的查詢日期 (YYYYMMDD)：
+ * - 00:00-14:49 使用前一天的夜盤資料
+ * - 14:50-23:59 使用當天的夜盤資料
+ * 並排除週末與國定假日
+ */
+export function getNightSessionDate(now: Date = new Date()): string {
+  const timeInMinutes = now.getHours() * 60 + now.getMinutes();
+
+  let dateForQuery = now;
+  if (timeInMinutes < 14 * 60 + 50) {
+    dateForQuery = new Date(now);
+    dateForQuery.setDate(dateForQuery.getDate() - 1);
+  }
+
+  return formatDateToYYYYMMDD(getLastTradingDay(dateForQuery));
+}
+
+/**
  * 取得今日日盤資料
  * 邏輯：08:30 前查詢前一個交易日的日盤
  * @param symbol 商品代碼 (例如: MXF)
  * @returns 日盤分鐘資料陣列
  */
 export async function getTodayDaySession(symbol: string): Promise<MinuteBar[]> {
-  const now = new Date();
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  const timeInMinutes = hour * 60 + minute;
-  
-  // 08:30 前使用前一天的日期
-  let dateForQuery = now;
-  if (timeInMinutes < 8 * 60 + 30) {  // 小於 08:30
-    dateForQuery = new Date(now);
-    dateForQuery.setDate(dateForQuery.getDate() - 1);
-  }
-  
-  // 確保日期是交易日（排除週末與國定假日）
-  dateForQuery = getLastTradingDay(dateForQuery);
-  
-  const dateStr = formatDateToYYYYMMDD(dateForQuery);
-  return getMinuteData(symbol, dateStr, 'regular');
+  return getMinuteData(symbol, getDaySessionDate(), 'regular');
 }
 
 /**
@@ -126,40 +246,60 @@ export async function getTodayDaySession(symbol: string): Promise<MinuteBar[]> {
  * @returns 夜盤分鐘資料陣列
  */
 export async function getTodayNightSession(symbol: string): Promise<MinuteBar[]> {
-  const now = new Date();
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  const timeInMinutes = hour * 60 + minute;
-  
-  // 14:50 前使用前一天的日期
-  let dateForQuery = now;
-  if (timeInMinutes < 14 * 60 + 50) {  // 小於 14:50
-    dateForQuery = new Date(now);
-    dateForQuery.setDate(dateForQuery.getDate() - 1);
-  }
-  
-  // 確保日期是交易日（排除週末與國定假日）
-  dateForQuery = getLastTradingDay(dateForQuery);
-  
-  const dateStr = formatDateToYYYYMMDD(dateForQuery);
-  return getMinuteData(symbol, dateStr, 'after_hours');
+  return getMinuteData(symbol, getNightSessionDate(), 'after_hours');
 }
 
 /**
  * 取得今日資料（日盤 + 夜盤）
+ * 日盤與夜盤落在同一天集合時（14:50 之後）只讀一次再切分，避免同一集合重複讀取
  * @param symbol 商品代碼 (例如: MXF)
  * @returns 分鐘資料陣列（日盤在前，夜盤在後）
  */
 export async function getTodayMinuteData(symbol: string): Promise<MinuteBar[]> {
+  const now = new Date();
+  const dayDate = getDaySessionDate(now);
+  const nightDate = getNightSessionDate(now);
+
+  if (dayDate === nightDate) {
+    const allData = await getMinuteData(symbol, dayDate);
+    const sorted = sortMinuteBars(allData);
+    console.log(`📈 日盤: ${sorted.filter((bar) => bar.market_type === 'regular').length} 筆, 夜盤: ${sorted.filter((bar) => bar.market_type === 'after_hours').length} 筆`);
+    return sorted;
+  }
+
   const [dayData, nightData] = await Promise.all([
-    getTodayDaySession(symbol),
-    getTodayNightSession(symbol)
+    getMinuteData(symbol, dayDate, 'regular'),
+    getMinuteData(symbol, nightDate, 'after_hours')
   ]);
-  
+
   console.log(`📈 日盤: ${dayData.length} 筆, 夜盤: ${nightData.length} 筆`);
-  
+
   // 日盤在前，夜盤在後
   return [...dayData, ...nightData];
+}
+
+/**
+ * 取得指定日期日盤的收盤價（用於漲跌幅參考價）
+ * 直接讀日盤最後一根 K 棒（1344）；結算日 13:30 收盤則改讀 1329。每次最多讀 2 筆文件。
+ * @param symbol 商品代碼 (例如: MXF)
+ * @param date 日期 (格式: YYYYMMDD)
+ * @returns 收盤價，兩根都讀不到（或讀取失敗）則回傳 null
+ */
+export async function getDaySessionClosePrice(symbol: string, date: string): Promise<number | null> {
+  for (const docId of DAY_SESSION_CLOSE_DOC_IDS) {
+    try {
+      const docSnap = await getDoc(doc(db, `market/${symbol}/${date}/${docId}`));
+      if (docSnap.exists()) {
+        const close = docSnap.data()?.close;
+        if (typeof close === 'number' && close > 0) {
+          return close;
+        }
+      }
+    } catch (error) {
+      console.error(`❌ 讀取日盤收盤價失敗 (${date}/${docId}):`, error);
+    }
+  }
+  return null;
 }
 
 /**

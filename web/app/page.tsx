@@ -22,8 +22,13 @@ import { resolveWsUrl } from './lib/wsUrl';
 import { 
   getTodayMinuteData, 
   getTodayDaySession, 
-  getTodayNightSession, 
-  getMinuteData, 
+  getTodayNightSession,
+  getMinuteDataAfter,
+  getDaySessionClosePrice,
+  getDaySessionDate as getDaySessionCollectionDate,
+  getNightSessionDate as getNightSessionCollectionDate,
+  getLatestBarTimestamp,
+  mergeMinuteBars,
   formatDateToYYYYMMDD,
   getLastTradingDay,
   getTodayDailyReport,
@@ -170,6 +175,13 @@ export default function Home() {
 function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
   // 分鐘級資料狀態
   const [allMinuteData, setAllMinuteData] = useState<MinuteBar[]>([]); // 所有資料
+  // 供定時器（閉包只建立一次）讀取最新的全部資料，增量合併必須建立在最新資料上
+  const allMinuteDataRef = useRef<MinuteBar[]>([]);
+  // 各盤別目前已載入的「盤別_集合日期」，一致時只做增量讀取，換日／換集合時改整批重讀
+  const loadedSessionKeysRef = useRef<Record<'regular' | 'after_hours', string | null>>({
+    regular: null,
+    after_hours: null
+  });
   const [minuteData, setMinuteData] = useState<MinuteBar[]>([]); // 當前顯示的資料
   const [chartData, setChartData] = useState<MinuteChartPoint[]>([]);
   const [dayChartData, setDayChartData] = useState<MinuteChartPoint[]>([]); // 日盤圖表資料
@@ -253,9 +265,9 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
           const nightDate = new Date(currentData[0].date);
           const dateStr = formatDateToYYYYMMDD(nightDate);
 
-          const dayData = await getMinuteData('MXF', dateStr, 'regular');
-          if (dayData.length > 0) {
-            const refPrice = dayData[dayData.length - 1].close;
+          // 只讀日盤最後一根 K 棒（1344，結算日為 1329），不再讀整個集合
+          const refPrice = await getDaySessionClosePrice('MXF', dateStr);
+          if (refPrice !== null) {
             console.log('🔵 夜盤參考價（當天日盤收盤）:', refPrice, '日期:', dateStr);
             return refPrice;
           }
@@ -274,9 +286,8 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
           
           console.log('📅 當前日期:', currentData[0].date, '查詢基準日:', dateStr);
           
-          const yesterdayData = await getMinuteData('MXF', dateStr, 'regular');
-          if (yesterdayData.length > 0) {
-            const refPrice = yesterdayData[yesterdayData.length - 1].close;
+          const refPrice = await getDaySessionClosePrice('MXF', dateStr);
+          if (refPrice !== null) {
             console.log('🔵 日盤參考價（前一交易日收盤）:', refPrice, '日期:', dateStr);
             return refPrice;
           }
@@ -384,7 +395,14 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
       try {
         const data = await getTodayMinuteData('MXF'); // 台指期商品代碼
         
+        // 記錄初始載入的集合日期，之後的輪詢才知道可以用增量讀取
+        loadedSessionKeysRef.current = {
+          regular: `regular_${getDaySessionCollectionDate()}`,
+          after_hours: `after_hours_${getNightSessionCollectionDate()}`
+        };
+
         if (data.length > 0) {
+          allMinuteDataRef.current = data;
           setAllMinuteData(data); // 儲存所有資料
 
           // 預設使用時間判斷的盤面，若無資料則退回最新資料盤面
@@ -545,20 +563,39 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
         // 判斷當前應該是什麼時段
         const currentSessionType = getDefaultMarketType();
         
-        // 只獲取當前時段的資料
-        const sessionData = currentSessionType === 'regular' 
-          ? await getTodayDaySession('MXF')
-          : await getTodayNightSession('MXF');
-        
-        // console.log(`🔄 更新 ${currentSessionType === 'regular' ? '日盤' : '夜盤'} 資料: ${sessionData.length} 筆`);
+        const currentData = allMinuteDataRef.current;
+        const currentSessionBars = currentData.filter(bar => bar.market_type === currentSessionType);
+        const collectionDate = currentSessionType === 'regular' ? getDaySessionCollectionDate() : getNightSessionCollectionDate();
+        const sessionKey = `${currentSessionType}_${collectionDate}`;
+        const cursor = getLatestBarTimestamp(currentSessionBars);
 
-        // 合併資料：保留其他時段的資料，更新當前時段的資料
-        const otherSessionData = allMinuteData.filter(bar => bar.market_type !== currentSessionType);
-        const mergedData = currentSessionType === 'regular'
-          ? [...sessionData, ...otherSessionData]  // 日盤在前
-          : [...otherSessionData, ...sessionData]; // 夜盤在後
+        let mergedData: MinuteBar[];
+        let sessionData: MinuteBar[];
+
+        if (loadedSessionKeysRef.current[currentSessionType] === sessionKey && cursor) {
+          // 同一個集合：只讀游標之後的新資料（約 1-2 筆）再合併，不重讀整個集合
+          const newBars = await getMinuteDataAfter('MXF', collectionDate, cursor, currentSessionType);
+          mergedData = mergeMinuteBars(currentData, newBars);
+          sessionData = mergedData.filter(bar => bar.market_type === currentSessionType);
+        } else {
+          // 首次載入該盤別、尚無資料或換日／換集合：整批重讀該盤別，之後再改走增量
+          sessionData = currentSessionType === 'regular'
+            ? await getTodayDaySession('MXF')
+            : await getTodayNightSession('MXF');
+
+          // 合併資料：保留其他時段的資料，更新當前時段的資料
+          const otherSessionData = currentData.filter(bar => bar.market_type !== currentSessionType);
+          mergedData = currentSessionType === 'regular'
+            ? [...sessionData, ...otherSessionData]  // 日盤在前
+            : [...otherSessionData, ...sessionData]; // 夜盤在後
+
+          if (sessionData.length > 0) {
+            loadedSessionKeysRef.current[currentSessionType] = sessionKey;
+          }
+        }
 
         if (sessionData.length > 0) {
+          allMinuteDataRef.current = mergedData;
           setAllMinuteData(mergedData);
 
           const preferredMarketType = isMarketTypeManuallySelected
