@@ -210,3 +210,57 @@ describe('savePttWindowSize', () => {
     await expect(savePttWindowSize('uid-1', 640, 600)).resolves.toBeUndefined();
   });
 });
+
+describe('PTT 設定文件讀取共用', () => {
+  const settingDoc = {
+    exists: () => true,
+    data: () => ({ width: 640, height: 600, intraday: { date: '20260806', last_read_index: 3 } }),
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('已讀位置與視窗大小同時讀取時只讀一次文件', async () => {
+    mockGetDoc.mockResolvedValue(settingDoc);
+
+    const [readIndex, size] = await Promise.all([
+      getPttReadState('uid-1', 'intraday', '20260806'),
+      getPttWindowSize('uid-1'),
+    ]);
+
+    expect(mockGetDoc).toHaveBeenCalledTimes(1);
+    expect(readIndex).toBe(3);
+    expect(size).toEqual({ width: 640, height: 600 });
+  });
+
+  it('前一次讀取完成後再讀取會重新讀文件（不保留快取，維持跨裝置同步）', async () => {
+    mockGetDoc.mockResolvedValue(settingDoc);
+
+    await getPttReadState('uid-1', 'intraday', '20260806');
+    await getPttReadState('uid-1', 'intraday', '20260806');
+
+    expect(mockGetDoc).toHaveBeenCalledTimes(2);
+  });
+
+  it('不同使用者不共用讀取', async () => {
+    mockGetDoc.mockResolvedValue(settingDoc);
+
+    await Promise.all([getPttWindowSize('uid-1'), getPttWindowSize('uid-2')]);
+
+    expect(mockGetDoc).toHaveBeenCalledTimes(2);
+  });
+
+  it('共用的讀取失敗時，兩者各自回傳預設值', async () => {
+    mockGetDoc.mockRejectedValue(new Error('network error'));
+
+    const [readIndex, size] = await Promise.all([
+      getPttReadState('uid-1', 'intraday', '20260806'),
+      getPttWindowSize('uid-1'),
+    ]);
+
+    expect(mockGetDoc).toHaveBeenCalledTimes(1);
+    expect(readIndex).toBe(-1);
+    expect(size).toBeNull();
+  });
+});

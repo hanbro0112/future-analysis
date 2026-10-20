@@ -251,59 +251,25 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
   };
 
   /**
-   * 計算參考價格（用於漲跌幅計算）
+   * 取得日盤與夜盤的參考價（用於漲跌幅計算），只靠日期推算，不需等分鐘資料載入
    * - 夜盤：使用當天日盤收盤價
-   * - 日盤：使用前一天日盤收盤價
-   * - 無資料時：使用當前盤別第一筆開盤價
+   * - 日盤：使用前一交易日日盤收盤價
+   * 兩個收盤價各只讀一筆文件並行取得，讀不到時回傳 null（由呼叫端退回開盤價）
    */
-  const calculateReferencePrice = async (marketType: 'regular' | 'after_hours', allData: MinuteBar[], currentData: MinuteBar[]): Promise<number> => {
-    try {
-      if (marketType === 'after_hours') {
-        // 夜盤：使用當天日盤收盤價
-        // 以夜盤資料本身的日期（與標題文字同一套邏輯）為準，而非批次抓取日盤資料時的系統當前時間
-        if (currentData.length > 0) {
-          const nightDate = new Date(currentData[0].date);
-          const dateStr = formatDateToYYYYMMDD(nightDate);
+  const fetchReferencePrices = async (): Promise<{ day: number | null; night: number | null }> => {
+    const dayDate = getDaySessionDate();
+    const previousDay = new Date(dayDate);
+    previousDay.setDate(previousDay.getDate() - 1);
 
-          // 只讀日盤最後一根 K 棒（1344，結算日為 1329），不再讀整個集合
-          const refPrice = await getDaySessionClosePrice('MXF', dateStr);
-          if (refPrice !== null) {
-            console.log('🔵 夜盤參考價（當天日盤收盤）:', refPrice, '日期:', dateStr);
-            return refPrice;
-          }
-        }
-      } else {
-        // 日盤：使用前一天日盤收盤價（考慮假日）
-        // 取當前查看的日盤資料日期，而非系統當前時間
-        if (currentData.length > 0) {
-          const currentDate = new Date(currentData[0].date);
-          const yesterday = new Date(currentDate);
-          yesterday.setDate(yesterday.getDate() - 1);
-          
-          // 找到最近的交易日（排除週末）
-          const lastTradingDay = getLastTradingDay(yesterday);
-          const dateStr = formatDateToYYYYMMDD(lastTradingDay);
-          
-          console.log('📅 當前日期:', currentData[0].date, '查詢基準日:', dateStr);
-          
-          const refPrice = await getDaySessionClosePrice('MXF', dateStr);
-          if (refPrice !== null) {
-            console.log('🔵 日盤參考價（前一交易日收盤）:', refPrice, '日期:', dateStr);
-            return refPrice;
-          }
-        }
-      }
-    } catch (error) {
-      console.error('❌ 計算參考價失敗:', error);
-    }
+    const dayRefDateStr = formatDateToYYYYMMDD(getLastTradingDay(previousDay));
+    const nightRefDateStr = formatDateToYYYYMMDD(getNightSessionDate());
 
-    // 後備方案：使用當前盤別第一筆開盤價
-    if (currentData.length > 0) {
-      console.log('⚠️ 使用後備方案：當前盤別開盤價:', currentData[0].open);
-      return currentData[0].open;
-    }
-    
-    return 0;
+    const [day, night] = await Promise.all([
+      getDaySessionClosePrice('MXF', dayRefDateStr),
+      getDaySessionClosePrice('MXF', nightRefDateStr)
+    ]);
+    console.log('🔵 參考價 - 日盤（前一交易日收盤）:', day, dayRefDateStr, '夜盤（當天日盤收盤）:', night, nightRefDateStr);
+    return { day, night };
   };
 
   // 從分鐘資料生成報價資訊
@@ -393,7 +359,11 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
       setIsLoading(true);
       
       try {
-        const data = await getTodayMinuteData('MXF'); // 台指期商品代碼
+        // 分鐘資料與參考價並行取得，全部就緒後才一起更新狀態，避免定時器拿到尚未算出的參考價
+        const [data, referencePrices] = await Promise.all([
+          getTodayMinuteData('MXF'), // 台指期商品代碼
+          fetchReferencePrices()
+        ]);
         
         // 記錄初始載入的集合日期，之後的輪詢才知道可以用增量讀取
         loadedSessionKeysRef.current = {
@@ -455,9 +425,9 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
           }));
           setChartData(chartPoints);
           
-          // 計算日盤和夜盤的參考價格（用於漲跌幅計算）
-          const dayRefPrice = await calculateReferencePrice('regular', data, dayData);
-          const nightRefPrice = await calculateReferencePrice('after_hours', data, nightData);
+          // 日盤和夜盤的參考價格（用於漲跌幅計算），讀不到時退回當前盤別第一筆開盤價
+          const dayRefPrice = referencePrices.day ?? dayData[0]?.open ?? 0;
+          const nightRefPrice = referencePrices.night ?? nightData[0]?.open ?? 0;
           setDayReferencePrice(dayRefPrice);
           setNightReferencePrice(nightRefPrice);
           console.log('📍 初始化基準價 - 日盤:', dayRefPrice, '夜盤:', nightRefPrice);
@@ -516,17 +486,32 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
     loadDailyReport();
   }, [loadDailyReport]);
 
-  // 使用 ref 追蹤定時器是否已啟動
-  const updateTimerRef = useRef<{ timeout?: NodeJS.Timeout; interval?: NodeJS.Timeout }>({});
   const isUpdatingRef = useRef(false);
-  const timerInitializedRef = useRef(false);
+
+  // 定時器只建立一次，更新函式透過這個 ref 讀取最新狀態，避免閉包拿到過期的值
+  const liveStateRef = useRef({
+    wsConnected,
+    isMarketTypeManuallySelected,
+    marketType,
+    dayReferencePrice,
+    nightReferencePrice
+  });
+  useEffect(() => {
+    liveStateRef.current = {
+      wsConnected,
+      isMarketTypeManuallySelected,
+      marketType,
+      dayReferencePrice,
+      nightReferencePrice
+    };
+  });
+
+  const hasMinuteData = minuteData.length > 0;
 
   // 定期更新分鐘級資料（每分鐘03秒更新一次）
   useEffect(() => {
-    // 只在首次有資料且未初始化時啟動定時器
-    if (minuteData.length === 0 || timerInitializedRef.current) return;
-    
-    timerInitializedRef.current = true;
+    // 只在首次有資料時啟動定時器
+    if (!hasMinuteData) return;
 
     // 計算下一次更新時間（每分鐘的03秒）
     function getNextUpdateDelay() {
@@ -554,7 +539,8 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
       // 檢查是否在交易時段內
       // 條件：如果 websocket 連線正常且沒有手動選擇盤別且不在交易時段，則跳過（有即時資料不需要更新歷史）
       // 否則：無論是斷線降級或手動選擇，都應該更新
-      if (wsConnected && !isMarketTypeManuallySelected && !isInTradingHours()) {
+      const gateState = liveStateRef.current;
+      if (gateState.wsConnected && !gateState.isMarketTypeManuallySelected && !isInTradingHours()) {
         isUpdatingRef.current = false;
         return;
       }
@@ -597,6 +583,9 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
         if (sessionData.length > 0) {
           allMinuteDataRef.current = mergedData;
           setAllMinuteData(mergedData);
+
+          // 請求期間使用者可能已切換盤別，這裡重新讀取最新狀態
+          const { isMarketTypeManuallySelected, marketType, dayReferencePrice, nightReferencePrice } = liveStateRef.current;
 
           const preferredMarketType = isMarketTypeManuallySelected
             ? marketType
@@ -679,29 +668,23 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
       }
     }
 
-    // 設定首次更新
-    const firstDelay = getNextUpdateDelay();
-    const firstTimeout = setTimeout(() => {
-      updateData();
-      
-      // 之後每60秒更新一次（在每分鐘的03秒）
-      const interval = setInterval(updateData, 60000);
-      updateTimerRef.current.interval = interval;
-    }, firstDelay);
-    
-    updateTimerRef.current.timeout = firstTimeout;
+    // 每輪結束後重新計算下一個 03 秒，避免固定間隔的 setInterval 隨時間漂移
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    const scheduleNext = () => {
+      timeoutId = setTimeout(async () => {
+        await updateData();
+        if (!cancelled) scheduleNext();
+      }, getNextUpdateDelay());
+    };
+    scheduleNext();
 
     return () => {
-      if (updateTimerRef.current.timeout) {
-        clearTimeout(updateTimerRef.current.timeout);
-      }
-      if (updateTimerRef.current.interval) {
-        clearInterval(updateTimerRef.current.interval);
-      }
-      updateTimerRef.current = {};
-      timerInitializedRef.current = false;
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [minuteData.length]);
+  }, [hasMinuteData]);
 
   // 監聽 WebSocket 重連，自動切回當前時段
   useEffect(() => {

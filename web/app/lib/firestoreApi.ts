@@ -505,6 +505,31 @@ function getPttSettingDocRef(uid: string) {
   return doc(db, 'users', uid, 'setting', 'pttReadState');
 }
 
+/** 進行中的設定文件讀取（以 uid 為 key），讓同一時間的多個讀取共用同一次請求 */
+const inflightPttSettingReads = new Map<string, Promise<DocumentData | undefined>>();
+
+/**
+ * 讀取 PTT 個人設定文件，回傳文件資料（文件不存在回傳 undefined）
+ *
+ * 已讀位置與視窗大小存在同一份文件，登入時兩者會同時讀取：
+ * 同一個 uid 還在讀取中時，後來的呼叫直接共用同一次請求，讀取完成後不保留快取，
+ * 之後（例如切換盤別）再讀取仍會取得最新內容，維持跨裝置同步
+ */
+function readPttSetting(uid: string): Promise<DocumentData | undefined> {
+  const inflight = inflightPttSettingReads.get(uid);
+  if (inflight) {
+    return inflight;
+  }
+
+  const request = getDoc(getPttSettingDocRef(uid))
+    .then((docSnap) => (docSnap.exists() ? docSnap.data() : undefined))
+    .finally(() => {
+      inflightPttSettingReads.delete(uid);
+    });
+  inflightPttSettingReads.set(uid, request);
+  return request;
+}
+
 /**
  * 取得使用者在指定日期與盤別的已讀位置（posts 陣列的索引）
  *
@@ -519,11 +544,11 @@ function getPttSettingDocRef(uid: string) {
  */
 export async function getPttReadState(uid: string, session: PttSession, date: string): Promise<number> {
   try {
-    const docSnap = await getDoc(getPttSettingDocRef(uid));
-    if (!docSnap.exists()) {
+    const data = await readPttSetting(uid);
+    if (!data) {
       return -1;
     }
-    const sessionData = docSnap.data()[session];
+    const sessionData = data[session];
     if (!sessionData || sessionData.date !== date) {
       return -1;
     }
@@ -566,11 +591,10 @@ export async function savePttReadState(
  */
 export async function getPttWindowSize(uid: string): Promise<{ width: number; height: number } | null> {
   try {
-    const docSnap = await getDoc(getPttSettingDocRef(uid));
-    if (!docSnap.exists()) {
+    const data = await readPttSetting(uid);
+    if (!data) {
       return null;
     }
-    const data = docSnap.data();
     if (typeof data.width === 'number' && typeof data.height === 'number') {
       return { width: data.width, height: data.height };
     }
