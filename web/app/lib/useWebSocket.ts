@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { isInTradingHours } from './tradingHours';
 
 /**
@@ -27,8 +27,21 @@ export interface UseWebSocketResult {
   error: string | null;
 }
 
+/** 後端推送的單一商品報價 */
+interface PriceMessageEntry {
+  price: number;
+  underlying_price?: number;
+  volume?: number;
+}
+
 /** WebSocket 因驗證失敗（Token 過期或無效）而關閉時，後端回傳的 close code */
 const AUTH_FAILURE_CLOSE_CODE = 4401;
+
+/** WebSocket 因非交易時段（收盤中斷或拒絕連線）而關閉時，後端回傳的 close code */
+const NOT_TRADING_HOURS_CLOSE_CODE = 4403;
+
+/** 非交易時段（或被後端以 4403 拒絕）時，再次檢查是否可以連線的間隔 */
+const OFF_HOURS_CHECK_INTERVAL_MS = 30000;
 
 /**
  * WebSocket Hook 用於接收即時報價
@@ -36,7 +49,13 @@ const AUTH_FAILURE_CLOSE_CODE = 4401;
  *   每次連線（含重連）都會呼叫一次，確保使用的是未過期的 Token；
  *   當上一次連線因驗證失敗而關閉時，會以 forceRefresh=true 呼叫，要求呼叫端強制換發新 Token。
  * @param autoReconnect 是否自動重連 (預設: true)
- * @param reconnectInterval 重連間隔 (ms, 預設: 10000)
+ * @param reconnectInterval 連線失敗後的重連間隔 (ms, 預設: 10000)
+ *
+ * 重連策略：
+ * - 曾經連上的連線斷線時立即重連一次（不經過計時器，避免背景分頁的計時器被瀏覽器節流而拖慢）。
+ * - 連線失敗則依 reconnectInterval 重試；收到 4403 或不在交易時段則每 30 秒檢查一次，
+ *   所以收盤中斷後，下個時段開始時會自動恢復連線。
+ * - 網路恢復（online）、分頁轉為可見、從往返快取還原（pageshow）時，若尚未連線會立即重連。
  */
 export function useWebSocket(
   getUrl: ((forceRefresh: boolean) => Promise<string | null>) | null,
@@ -47,184 +66,226 @@ export function useWebSocket(
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isMountedRef = useRef(true);
-
   useEffect(() => {
-    isMountedRef.current = true;
+    // 尚未取得連線位址（例如尚未登入）時不連線
+    if (!getUrl) {
+      setIsConnected(false);
+      return;
+    }
+    const resolveUrl = getUrl;
+
+    // 以下狀態只屬於這一次 effect 執行：依賴變動時舊的連線與延遲中的工作不會影響新的
+    let active = true;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let isConnecting = false;
     // 上一次連線是否因驗證失敗而關閉；若是，下一次連線需強制換發新 Token
     let forceRefreshNextConnect = false;
 
-    async function connect() {
-      // 尚未取得連線位址（例如尚未登入）時不連線
-      if (!getUrl) {
+    function clearReconnectTimer(): void {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    }
+
+    function scheduleReconnect(delay: number): void {
+      if (!autoReconnect || !active) return;
+      clearReconnectTimer();
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        void connect();
+      }, delay);
+    }
+
+    function handleMessage(data: unknown): void {
+      try {
+        const message = JSON.parse(String(data));
+
+        // 處理報價資料更新
+        // 預期格式: { type: "price", data: { "MXF": { "price": 23450, "underlying_price": 23440, "volume": 150 } }, timestamp: "..." }
+        if (message.type === 'price' && typeof message.data === 'object' && message.data !== null) {
+          const updatedPrices = Object.entries(message.data).reduce((acc, [code, priceData]) => {
+            if (typeof priceData === 'object' && priceData !== null) {
+              const entry = priceData as PriceMessageEntry;
+              acc[code] = {
+                code,
+                price: entry.price,
+                underlying_price: entry.underlying_price,
+                volume: entry.volume,
+              };
+            }
+            return acc;
+          }, {} as Record<string, RealtimePrice>);
+
+          // 只在價格真的改變時才更新狀態，避免不必要的重新渲染
+          setPrices((prev) => {
+            let hasChanges = false;
+
+            // 檢查是否有實際的變化
+            for (const [code, newPrice] of Object.entries(updatedPrices)) {
+              const oldPrice = prev[code];
+              if (!oldPrice ||
+                  oldPrice.price !== newPrice.price ||
+                  oldPrice.underlying_price !== newPrice.underlying_price ||
+                  oldPrice.volume !== newPrice.volume) {
+                hasChanges = true;
+                break;
+              }
+            }
+
+            // 如果沒有變化，返回舊的狀態物件，避免重新渲染
+            if (!hasChanges) {
+              return prev;
+            }
+
+            // 有變化時才創建新物件
+            return {
+              ...prev,
+              ...updatedPrices
+            };
+          });
+        }
+      } catch {
+        // 靜默處理解析錯誤
+      }
+    }
+
+    function openSocket(url: string): void {
+      let socket: WebSocket;
+      try {
+        socket = new WebSocket(url);
+      } catch {
+        // 靜默處理連線失敗
         setIsConnected(false);
+        scheduleReconnect(reconnectInterval);
         return;
       }
 
-      // 僅在交易時段建立連線
+      ws = socket;
+      let hasOpened = false;
+
+      // 所有事件處理器都先確認自己仍是目前的連線，避免舊連線遲到的事件清掉新連線或重複重連
+      socket.onopen = () => {
+        if (ws !== socket) return;
+        hasOpened = true;
+        setIsConnected(true);
+        setError(null);
+      };
+
+      socket.onmessage = (event) => {
+        if (ws !== socket) return;
+        handleMessage(event.data);
+      };
+
+      socket.onerror = () => {
+        if (ws !== socket) return;
+        // 靜默處理錯誤，避免控制台報錯
+        setIsConnected(false);
+      };
+
+      socket.onclose = (event) => {
+        if (ws !== socket) return;
+        ws = null;
+        setIsConnected(false);
+
+        // 因驗證失敗關閉時，下次重連需強制換發新 Token，避免用同一個過期 Token 無限重試
+        if (event.code === AUTH_FAILURE_CLOSE_CODE) {
+          forceRefreshNextConnect = true;
+        }
+
+        if (!autoReconnect) return;
+
+        // 收盤中斷（或被拒絕）：改為定期檢查，下個時段開始後自動恢復
+        if (event.code === NOT_TRADING_HOURS_CLOSE_CODE) {
+          scheduleReconnect(OFF_HOURS_CHECK_INTERVAL_MS);
+          return;
+        }
+
+        // 曾經連上的連線斷線：立即重連一次，不經過計時器（背景分頁的計時器會被瀏覽器節流）
+        if (hasOpened) {
+          void connect();
+          return;
+        }
+
+        // 連線本身就失敗：依間隔重試
+        scheduleReconnect(reconnectInterval);
+      };
+    }
+
+    async function connect(): Promise<void> {
+      if (!active || isConnecting) return;
+
+      // 僅在交易時段建立連線；不在時段內則定期再檢查，不會中斷重連流程
       if (!isInTradingHours()) {
         setIsConnected(false);
-        // 非交易時段，等待一段時間後再檢查
-        if (autoReconnect && isMountedRef.current) {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            if (isMountedRef.current) {
-              connect();
-            }
-          }, 60000); // 1 分鐘後再檢查
-        }
+        scheduleReconnect(OFF_HOURS_CHECK_INTERVAL_MS);
         return;
       }
 
-      // 清除舊連線
-      if (wsRef.current) {
-        wsRef.current.close();
+      // 理論上此時沒有連線，若殘留舊連線先收掉
+      if (ws) {
+        const stale = ws;
+        ws = null;
+        stale.close();
       }
 
+      isConnecting = true;
       const forceRefresh = forceRefreshNextConnect;
       forceRefreshNextConnect = false;
 
       let url: string | null;
       try {
-        url = await getUrl(forceRefresh);
-      } catch (err) {
+        url = await resolveUrl(forceRefresh);
+      } catch {
         // 取得 Token 失敗，靜默處理並排程重試
         url = null;
       }
+      isConnecting = false;
 
-      if (!isMountedRef.current) return;
+      if (!active) return;
 
       if (!url) {
         setIsConnected(false);
-        if (autoReconnect && isMountedRef.current) {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            if (isMountedRef.current) {
-              connect();
-            }
-          }, reconnectInterval);
-        }
+        scheduleReconnect(reconnectInterval);
         return;
       }
 
-      try {
-        const ws = new WebSocket(url);
-        wsRef.current = ws;
+      openSocket(url);
+    }
 
-        ws.onopen = () => {
-          if (!isMountedRef.current) return;
-          setIsConnected(true);
-          setError(null);
-        };
+    // 網路恢復、分頁轉為可見、從往返快取還原時，若尚未連線就立即重連
+    function reconnectNow(): void {
+      if (!active || !autoReconnect) return;
+      if (ws || isConnecting) return;
+      clearReconnectTimer();
+      void connect();
+    }
 
-        ws.onmessage = (event) => {
-          if (!isMountedRef.current) return;
-
-          try {
-            const message = JSON.parse(event.data);
-            
-            // 處理報價資料更新
-            // 預期格式: { type: "price", data: { "MXF": { "price": 23450, "underlying_price": 23440, "volume": 150 } }, timestamp: "..." }
-            if (message.type === 'price' && typeof message.data === 'object' && message.data !== null) {
-              const pricesData = message.data;
-              const updatedPrices = Object.entries(pricesData).reduce((acc, [code, priceData]) => {
-                if (typeof priceData === 'object' && priceData !== null) {
-                  acc[code] = {
-                    code,
-                    price: (priceData as any).price,
-                    underlying_price: (priceData as any).underlying_price,
-                    volume: (priceData as any).volume,
-                  };
-                }
-                return acc;
-              }, {} as Record<string, RealtimePrice>);
-              
-              // 只在價格真的改變時才更新狀態，避免不必要的重新渲染
-              setPrices((prev) => {
-                let hasChanges = false;
-                
-                // 檢查是否有實際的變化
-                for (const [code, newPrice] of Object.entries(updatedPrices)) {
-                  const oldPrice = prev[code];
-                  if (!oldPrice || 
-                      oldPrice.price !== newPrice.price || 
-                      oldPrice.underlying_price !== newPrice.underlying_price || 
-                      oldPrice.volume !== newPrice.volume) {
-                    hasChanges = true;
-                    break;
-                  }
-                }
-                
-                // 如果沒有變化，返回舊的狀態物件，避免重新渲染
-                if (!hasChanges) {
-                  return prev;
-                }
-                
-                // 有變化時才創建新物件
-                return {
-                  ...prev,
-                  ...updatedPrices
-                };
-              });
-            }
-          } catch (err) {
-            // 靜默處理解析錯誤
-          }
-        };
-
-        ws.onerror = () => {
-          if (!isMountedRef.current) return;
-          // 靜默處理錯誤，避免控制台報錯
-          setIsConnected(false);
-        };
-
-        ws.onclose = (event) => {
-          if (!isMountedRef.current) return;
-          setIsConnected(false);
-          wsRef.current = null;
-
-          // 因驗證失敗關閉時，下次重連需強制換發新 Token，避免用同一個過期 Token 無限重試
-          if (event.code === AUTH_FAILURE_CLOSE_CODE) {
-            forceRefreshNextConnect = true;
-          }
-
-          // 僅在交易時段自動重連
-          if (autoReconnect && isMountedRef.current && isInTradingHours()) {
-            reconnectTimeoutRef.current = setTimeout(() => {
-              if (isMountedRef.current && isInTradingHours()) {
-                connect();
-              }
-            }, reconnectInterval);
-          }
-        };
-      } catch (err) {
-        // 靜默處理連線失敗
-        setIsConnected(false);
-
-        // 僅在交易時段自動重連
-        if (autoReconnect && isMountedRef.current && isInTradingHours()) {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            if (isMountedRef.current && isInTradingHours()) {
-              connect();
-            }
-          }, reconnectInterval);
-        }
+    function handleVisibilityChange(): void {
+      if (document.visibilityState === 'visible') {
+        reconnectNow();
       }
     }
 
-    connect();
+    window.addEventListener('online', reconnectNow);
+    window.addEventListener('pageshow', reconnectNow);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    void connect();
 
     // 清理函數
     return () => {
-      isMountedRef.current = false;
-      
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
+      active = false;
+      clearReconnectTimer();
+      window.removeEventListener('online', reconnectNow);
+      window.removeEventListener('pageshow', reconnectNow);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+      const current = ws;
+      ws = null;
+      if (current) {
+        current.close();
       }
     };
   }, [getUrl, autoReconnect, reconnectInterval]);
