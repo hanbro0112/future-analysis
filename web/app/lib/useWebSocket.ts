@@ -43,19 +43,22 @@ const NOT_TRADING_HOURS_CLOSE_CODE = 4403;
 /** 非交易時段（或被後端以 4403 拒絕）時，再次檢查是否可以連線的間隔 */
 const OFF_HOURS_CHECK_INTERVAL_MS = 30000;
 
+/** 連續連線失敗時，重連間隔指數退避的上限 */
+const MAX_RECONNECT_INTERVAL_MS = 60000;
+
 /**
  * WebSocket Hook 用於接收即時報價
  * @param getUrl 取得 WebSocket 連線網址（含最新驗證 Token）的函數；傳入 null 時不建立連線（例如尚未登入）。
  *   每次連線（含重連）都會呼叫一次，確保使用的是未過期的 Token；
  *   當上一次連線因驗證失敗而關閉時，會以 forceRefresh=true 呼叫，要求呼叫端強制換發新 Token。
  * @param autoReconnect 是否自動重連 (預設: true)
- * @param reconnectInterval 連線失敗後的重連間隔 (ms, 預設: 10000)
+ * @param reconnectInterval 連線失敗後的首次重連間隔 (ms, 預設: 10000)；連續失敗時每次加倍，上限 60 秒，連上後重置
  *
  * 重連策略：
  * - 曾經連上的連線斷線時立即重連一次（不經過計時器，避免背景分頁的計時器被瀏覽器節流而拖慢）。
- * - 連線失敗則依 reconnectInterval 重試；收到 4403 或不在交易時段則每 30 秒檢查一次，
- *   所以收盤中斷後，下個時段開始時會自動恢復連線。
- * - 網路恢復（online）、分頁轉為可見、從往返快取還原（pageshow）時，若尚未連線會立即重連。
+ * - 連線失敗則依 reconnectInterval 起算、連續失敗時指數退避（上限 60 秒）重試；
+ *   收到 4403 或不在交易時段則每 30 秒檢查一次，所以收盤中斷後，下個時段開始時會自動恢復連線。
+ * - 網路恢復（online）、分頁轉為可見、從往返快取還原（pageshow）時，若尚未連線會立即重連並重置退避。
  */
 export function useWebSocket(
   getUrl: ((forceRefresh: boolean) => Promise<string | null>) | null,
@@ -79,6 +82,8 @@ export function useWebSocket(
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let isConnecting = false;
+    // 連續連線失敗（從未連上）的次數，用來計算退避間隔；連上後歸零
+    let consecutiveFailures = 0;
     // 上一次連線是否因驗證失敗而關閉；若是，下一次連線需強制換發新 Token
     let forceRefreshNextConnect = false;
 
@@ -96,6 +101,14 @@ export function useWebSocket(
         reconnectTimer = null;
         void connect();
       }, delay);
+    }
+
+    // 連線失敗後排程重試：間隔從 reconnectInterval 起算，每連續失敗一次加倍，上限 60 秒
+    function scheduleRetryAfterFailure(): void {
+      consecutiveFailures += 1;
+      const maxDelay = Math.max(MAX_RECONNECT_INTERVAL_MS, reconnectInterval);
+      const delay = Math.min(reconnectInterval * 2 ** (consecutiveFailures - 1), maxDelay);
+      scheduleReconnect(delay);
     }
 
     function handleMessage(data: unknown): void {
@@ -158,7 +171,7 @@ export function useWebSocket(
       } catch {
         // 靜默處理連線失敗
         setIsConnected(false);
-        scheduleReconnect(reconnectInterval);
+        scheduleRetryAfterFailure();
         return;
       }
 
@@ -169,6 +182,7 @@ export function useWebSocket(
       socket.onopen = () => {
         if (ws !== socket) return;
         hasOpened = true;
+        consecutiveFailures = 0;
         setIsConnected(true);
         setError(null);
       };
@@ -208,8 +222,8 @@ export function useWebSocket(
           return;
         }
 
-        // 連線本身就失敗：依間隔重試
-        scheduleReconnect(reconnectInterval);
+        // 連線本身就失敗：依退避間隔重試
+        scheduleRetryAfterFailure();
       };
     }
 
@@ -247,7 +261,7 @@ export function useWebSocket(
 
       if (!url) {
         setIsConnected(false);
-        scheduleReconnect(reconnectInterval);
+        scheduleRetryAfterFailure();
         return;
       }
 
@@ -259,6 +273,7 @@ export function useWebSocket(
       if (!active || !autoReconnect) return;
       if (ws || isConnecting) return;
       clearReconnectTimer();
+      consecutiveFailures = 0;
       void connect();
     }
 

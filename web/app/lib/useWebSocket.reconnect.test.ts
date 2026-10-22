@@ -240,4 +240,105 @@ describe('useWebSocket 重連策略', () => {
 
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
+
+  it('連續失敗時重連間隔指數退避（10 → 20 → 40 → 60 秒），上限 60 秒', async () => {
+    renderHook(() => useWebSocket(getUrl));
+    await advance(0);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    // 第 1 次失敗：10 秒後重試
+    await closeLatest(1006);
+    await advance(10000 - 1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await advance(1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    // 第 2 次失敗：20 秒後重試
+    await closeLatest(1006);
+    await advance(20000 - 1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    await advance(1);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+
+    // 第 3 次失敗：40 秒後重試
+    await closeLatest(1006);
+    await advance(40000 - 1);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+    await advance(1);
+    expect(FakeWebSocket.instances).toHaveLength(4);
+
+    // 第 4 次、第 5 次失敗：都封頂在 60 秒
+    await closeLatest(1006);
+    await advance(60000 - 1);
+    expect(FakeWebSocket.instances).toHaveLength(4);
+    await advance(1);
+    expect(FakeWebSocket.instances).toHaveLength(5);
+
+    await closeLatest(1006);
+    await advance(60000 - 1);
+    expect(FakeWebSocket.instances).toHaveLength(5);
+    await advance(1);
+    expect(FakeWebSocket.instances).toHaveLength(6);
+  });
+
+  it('連上之後退避重置，之後再失敗又從最短間隔開始', async () => {
+    renderHook(() => useWebSocket(getUrl));
+    await advance(0);
+
+    // 連續失敗兩次，間隔已拉長到 20 秒
+    await closeLatest(1006);
+    await advance(10000);
+    await closeLatest(1006);
+    await advance(20000);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+
+    // 這次連上了，之後斷線會立即重連，且這次新連線再失敗時回到 10 秒
+    await openLatest();
+    await closeLatest(1006);
+    await advance(0);
+    expect(FakeWebSocket.instances).toHaveLength(4);
+
+    await closeLatest(1006);
+    await advance(10000 - 1);
+    expect(FakeWebSocket.instances).toHaveLength(4);
+    await advance(1);
+    expect(FakeWebSocket.instances).toHaveLength(5);
+  });
+
+  it('取不到連線網址（Token 失敗）時同樣退避', async () => {
+    getUrl.mockResolvedValue(null);
+    renderHook(() => useWebSocket(getUrl));
+    await advance(0);
+    expect(getUrl).toHaveBeenCalledTimes(1);
+
+    await advance(10000);
+    expect(getUrl).toHaveBeenCalledTimes(2);
+
+    // 第 2 次失敗後間隔變 20 秒
+    await advance(20000 - 1);
+    expect(getUrl).toHaveBeenCalledTimes(2);
+    await advance(1);
+    expect(getUrl).toHaveBeenCalledTimes(3);
+  });
+
+  it('online／可見事件會重置退避，立即重連後再失敗從最短間隔開始', async () => {
+    renderHook(() => useWebSocket(getUrl));
+    await advance(0);
+
+    // 連續失敗兩次，間隔已拉長到 20 秒
+    await closeLatest(1006);
+    await advance(10000);
+    await closeLatest(1006);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await advance(0);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+
+    await closeLatest(1006);
+    await advance(10000);
+    expect(FakeWebSocket.instances).toHaveLength(4);
+  });
 });
