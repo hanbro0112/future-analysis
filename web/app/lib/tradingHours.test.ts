@@ -54,4 +54,33 @@ describe('isInTradingHours', () => {
       process.env.TZ = originalTZ;
     }
   });
+
+  describe('國定假日（與後端一致）', () => {
+    // 2026-09-24 週四（交易日）、09-25 週五（中秋節休市）、09-26 週六、09-28 週一（補假休市）
+
+    it('休市日白天（中秋節 台北時間 10:30）應判定為非交易時段', () => {
+      expect(isInTradingHours(new Date('2026-09-25T02:30:00Z'))).toBe(false);
+    });
+
+    it('休市日夜間（中秋節 台北時間 16:30）不會有新夜盤，應判定為非交易時段', () => {
+      expect(isInTradingHours(new Date('2026-09-25T08:30:00Z'))).toBe(false);
+    });
+
+    it('休市日前一天（週四）夜盤照常開盤，台北時間 16:30 為交易時段', () => {
+      expect(isInTradingHours(new Date('2026-09-24T08:30:00Z'))).toBe(true);
+    });
+
+    it('休市日凌晨延續自前一個交易日夜盤，台北時間 02:00 為交易時段、05:01 起為非交易時段', () => {
+      expect(isInTradingHours(new Date('2026-09-24T18:00:00Z'))).toBe(true);
+      expect(isInTradingHours(new Date('2026-09-24T21:01:00Z'))).toBe(false);
+    });
+
+    it('休市日隔天凌晨（前一天是休市日），週六台北時間 02:00 不屬於夜盤延續，應判定為非交易時段', () => {
+      expect(isInTradingHours(new Date('2026-09-25T18:00:00Z'))).toBe(false);
+    });
+
+    it('連假結束後的第一個交易日（週二）日盤照常，台北時間 10:30 為交易時段', () => {
+      expect(isInTradingHours(new Date('2026-09-29T02:30:00Z'))).toBe(true);
+    });
+  });
 });
