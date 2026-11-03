@@ -163,6 +163,31 @@ gcloud compute ssh --tunnel-through-iap --zone="$ZONE" "$VM_NAME" \
 改成 `wss://ws.txfutures.com`，重新跑 `Deploy Web to Cloudflare Pages` 切換流量。
 在那之前 `deploy-apps.yml`（Cloud Run）維持不動，兩者並存互不影響。
 
+## 查看 Docker Logs
+
+服務名稱：`price-listener`、`price-analyzer`、`price-broadcaster`、`caddy`（不指定則顯示全部）。
+
+不進 VM，直接取最近的 log：
+
+```bash
+gcloud compute ssh --tunnel-through-iap --zone="$ZONE" "$VM_NAME" \
+  --command="cd /opt/future-analysis && sudo docker compose logs --tail=200 price-listener"
+```
+
+進 VM 互動查看：
+
+```bash
+gcloud compute ssh --tunnel-through-iap --zone="$ZONE" "$VM_NAME"
+
+cd /opt/future-analysis
+sudo docker compose ps                                          # 服務狀態
+sudo docker compose logs -f --tail=100 price-listener           # 即時追蹤
+sudo docker compose logs --since=30m price-analyzer             # 最近 30 分鐘
+sudo docker compose logs -t price-broadcaster | grep -i error   # 帶時間戳並過濾錯誤
+```
+
+log 驅動為 `json-file`，每個容器只保留 10MB × 3 份，較舊的 log 會被輪替掉。
+
 ## 部署注意事項
 
 ### 避開交易時段部署
