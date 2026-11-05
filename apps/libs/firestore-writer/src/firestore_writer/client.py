@@ -83,25 +83,27 @@ class FirestoreWriter:
         collection: str,
         document_id: Optional[str] = None,
         data: Dict[str, Any] = None,
-        merge: bool = False
+        merge: bool = False,
+        set_created_at: bool = True
     ) -> str:
         """
         寫入文件到 Firestore（含重試機制）
-        
+
         Args:
             collection: 集合名稱
             document_id: 文件 ID（可選，不提供則自動生成）
             data: 要寫入的資料
             merge: 是否合併現有文件（True）或覆蓋（False）
-            
+            set_created_at: 是否自動補上 created_at；補寫既有文件時設為 False，避免重設建立時間
+
         Returns:
             文件 ID
         """
         if data is None:
             data = {}
-        
+
         # 自動添加時間戳記
-        if 'created_at' not in data:
+        if set_created_at and 'created_at' not in data:
             data['created_at'] = firestore.SERVER_TIMESTAMP
         data['updated_at'] = firestore.SERVER_TIMESTAMP
         

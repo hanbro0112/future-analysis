@@ -9,7 +9,13 @@ import time
 from typing import Callable, Optional
 from google.cloud import pubsub_v1
 from google.cloud.pubsub_v1.publisher import Client as PublisherClient
-from google.cloud.pubsub_v1.types import FlowControl
+from google.cloud.pubsub_v1.types import (
+    BatchSettings,
+    FlowControl,
+    LimitExceededBehavior,
+    PublisherOptions,
+    PublishFlowControl,
+)
 from google.api_core.exceptions import (
     Aborted,
     AlreadyExists,
@@ -45,6 +51,18 @@ _RETRYABLE_MESSAGE_MARKERS = ("RST_STREAM", "UNAVAILABLE", "DEADLINE_EXCEEDED")
 # 串流撐過這段時間才失敗，視為先前連線是健康的，連續失敗次數重新計算
 HEALTHY_STREAM_SECONDS = 60.0
 
+# 非同步發布的批次設定：累積到 100 則或 10ms 就送出，每筆最多多等 10ms
+ASYNC_BATCH_MAX_MESSAGES = 100
+ASYNC_BATCH_MAX_BYTES = 1024 * 1024
+ASYNC_BATCH_MAX_LATENCY_SECONDS = 0.01
+
+# 尚未送達的訊息上限；超過時 publish 直接丟出例外（記為丟棄），不阻塞呼叫端（Shioaji 回調執行緒）
+ASYNC_FLOW_CONTROL_MESSAGE_LIMIT = 10_000
+ASYNC_FLOW_CONTROL_BYTE_LIMIT = 20 * 1024 * 1024
+
+# 發布失敗的 log 節流：第 1 次與之後每 N 次才印一行，避免服務異常時洗版
+PUBLISH_FAILURE_LOG_EVERY = 100
+
 
 def is_retryable_error(error: BaseException) -> bool:
     """判斷訂閱串流的錯誤是否為暫時性錯誤（值得重建串流重試）"""
@@ -55,27 +73,60 @@ def is_retryable_error(error: BaseException) -> bool:
     return any(marker in message for marker in _RETRYABLE_MESSAGE_MARKERS)
 
 
-def get_publisher_client(project_id: str = "demo-project") -> PublisherClient:
+def get_publisher_client(
+    project_id: str = "demo-project",
+    batch_settings: BatchSettings | None = None,
+    publisher_options: PublisherOptions | None = None,
+) -> PublisherClient:
     """
     取得 Pub/Sub Publisher 客戶端
-    
+
     Args:
         project_id: GCP 專案 ID，預設為 demo-project（適用於 emulator）
-    
+        batch_settings: 批次發布設定，None 表示使用函式庫預設值
+        publisher_options: 發布選項（例如 flow control），None 表示使用函式庫預設值
+
     Returns:
         PublisherClient 實例
-    
+
     Environment Variables:
         PUBSUB_EMULATOR_HOST: 設定後會自動連接到 emulator（例如：localhost:8085）
     """
     emulator_host = os.getenv("PUBSUB_EMULATOR_HOST")
-    
+
     if emulator_host:
         print(f"🔧 使用 Pub/Sub Emulator: {emulator_host}")
     else:
         print(f"☁️  連接到正式 Pub/Sub 環境")
-    
-    return pubsub_v1.PublisherClient()
+
+    kwargs: dict[str, object] = {}
+    if batch_settings is not None:
+        kwargs["batch_settings"] = batch_settings
+    if publisher_options is not None:
+        kwargs["publisher_options"] = publisher_options
+    return pubsub_v1.PublisherClient(**kwargs)
+
+
+def build_async_publisher_settings() -> tuple[BatchSettings, PublisherOptions]:
+    """
+    非同步發布使用的批次與 flow control 設定。
+
+    flow control 超過上限時選擇丟出例外（ERROR）而不是阻塞（BLOCK），
+    因為呼叫端是 Shioaji 的報價回調執行緒，絕不能被卡住。
+    """
+    batch_settings = BatchSettings(
+        max_messages=ASYNC_BATCH_MAX_MESSAGES,
+        max_bytes=ASYNC_BATCH_MAX_BYTES,
+        max_latency=ASYNC_BATCH_MAX_LATENCY_SECONDS,
+    )
+    publisher_options = PublisherOptions(
+        flow_control=PublishFlowControl(
+            message_limit=ASYNC_FLOW_CONTROL_MESSAGE_LIMIT,
+            byte_limit=ASYNC_FLOW_CONTROL_BYTE_LIMIT,
+            limit_exceeded_behavior=LimitExceededBehavior.ERROR,
+        )
+    )
+    return batch_settings, publisher_options
 
 
 def is_emulator_mode() -> bool:
@@ -91,11 +142,27 @@ def is_emulator_mode() -> bool:
 class PubSubPublisher:
     """Pub/Sub Publisher 輔助類別"""
     
-    def __init__(self, project_id: str = "demo-project"):
+    def __init__(self, project_id: str = "demo-project", async_mode: bool = False):
+        """
+        Args:
+            project_id: GCP 專案 ID
+            async_mode: True 時套用非同步發布用的批次與 flow control 設定，
+                搭配 publish_message_async 使用（例如 price-listener 的報價回調）
+        """
         self.project_id = project_id
-        self.client = get_publisher_client(project_id)
+        if async_mode:
+            batch_settings, publisher_options = build_async_publisher_settings()
+            self.client = get_publisher_client(project_id, batch_settings, publisher_options)
+        else:
+            self.client = get_publisher_client(project_id)
         self._topic_cache = set()
-    
+
+        # 非同步發布的統計（done callback 在 publisher 內部執行緒，需加鎖）
+        self._stats_lock = threading.Lock()
+        self._published_count = 0
+        self._failed_count = 0
+        self._dropped_count = 0
+
     def get_topic_path(self, topic_id: str) -> str:
         """取得 topic 的完整路徑"""
         return self.client.topic_path(self.project_id, topic_id)
@@ -191,6 +258,63 @@ class PubSubPublisher:
         
         return message_id
     
+    def publish_message_async(self, topic_id: str, data: dict, **attributes) -> bool:
+        """
+        非同步發布訊息：只把訊息交給 publisher 的批次佇列就返回，不等待伺服器回應。
+
+        不會檢查 topic 是否存在（呼叫端應在初始化時用 ensure_topic_exists 確認過），
+        發布結果由 done callback 統計；任何失敗都不會拋出，避免影響呼叫端（報價回調）。
+
+        Args:
+            topic_id: Topic ID
+            data: 要發布的資料（會轉換為 JSON）
+            **attributes: 額外的訊息屬性
+
+        Returns:
+            True 代表已交給 publisher；False 代表被丟棄（flow control 超限、publisher 已停止等）
+        """
+        try:
+            message_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
+            future = self.client.publish(self.get_topic_path(topic_id), message_data, **attributes)
+        except Exception as e:
+            self._record_dropped(e)
+            return False
+
+        future.add_done_callback(self._on_publish_done)
+        return True
+
+    def _on_publish_done(self, future: "pubsub_v1.publisher.futures.Future") -> None:
+        """發布完成的回調：成功計數，失敗計數並節流記錄"""
+        try:
+            future.result()
+        except Exception as e:
+            with self._stats_lock:
+                self._failed_count += 1
+                failed = self._failed_count
+            if failed == 1 or failed % PUBLISH_FAILURE_LOG_EVERY == 0:
+                print(f"❌ Pub/Sub 非同步發布失敗（累計 {failed} 筆）: {type(e).__name__}: {e}")
+            return
+
+        with self._stats_lock:
+            self._published_count += 1
+
+    def _record_dropped(self, error: BaseException) -> None:
+        """訊息在交給 publisher 前就被丟棄：計數並節流記錄"""
+        with self._stats_lock:
+            self._dropped_count += 1
+            dropped = self._dropped_count
+        if dropped == 1 or dropped % PUBLISH_FAILURE_LOG_EVERY == 0:
+            print(f"⚠️  Pub/Sub 訊息被丟棄（累計 {dropped} 筆）: {type(error).__name__}: {error}")
+
+    def get_publish_stats(self) -> dict[str, int]:
+        """取得非同步發布統計：published（已確認送達）、failed（送出失敗）、dropped（未送出即丟棄）"""
+        with self._stats_lock:
+            return {
+                "published": self._published_count,
+                "failed": self._failed_count,
+                "dropped": self._dropped_count,
+            }
+
     def publish_batch(self, topic_id: str, messages: list[dict]) -> list[str]:
         """
         批次發布多個訊息
@@ -213,8 +337,13 @@ class PubSubPublisher:
         return message_ids
     
     def close(self) -> None:
-        """釋放 Publisher 連線；呼叫後不可再發布訊息"""
+        """釋放 Publisher 連線，並先把批次佇列中尚未送出的訊息送完；呼叫後不可再發布訊息"""
         self.client.stop()
+
+        stats = self.get_publish_stats()
+        if stats["failed"] or stats["dropped"]:
+            print(f"📊 Pub/Sub 非同步發布統計: 成功 {stats['published']} / "
+                  f"失敗 {stats['failed']} / 丟棄 {stats['dropped']}")
 
     def delete_topic(self, topic_id: str) -> None:
         """
@@ -318,6 +447,22 @@ class PubSubSubscriber:
         
         return self.create_subscription()
     
+    def _on_message_failure(self, message: pubsub_v1.subscriber.message.Message, error: Exception) -> None:
+        """
+        訊息處理失敗（解析錯誤、callback 拋出例外）的統一出口。
+
+        目前策略：一律 ack。報價資料時效性高，重送只會造成亂序與重複累計成交量，
+        所以失敗的訊息不再重送。
+
+        之後若要改策略（例如暫時性錯誤 nack、永久性錯誤送 dead-letter、依錯誤類型區分），
+        只需要修改這個方法，不用動 subscribe() 的串流邏輯。
+        """
+        try:
+            message.ack()
+        except Exception as ack_error:
+            print(f"⚠️  失敗訊息 ack 時發生錯誤: {type(ack_error).__name__}: {ack_error} "
+                  f"(原始錯誤: {type(error).__name__}: {error})")
+
     def subscribe(
         self,
         callback: Callable[[dict], None],
@@ -364,10 +509,10 @@ class PubSubSubscriber:
                 
             except json.JSONDecodeError as e:
                 print(f"❌ JSON 解析錯誤: {e}")
-                message.nack()
+                self._on_message_failure(message, e)
             except Exception as e:
                 print(f"❌ 處理訊息時發生錯誤: {e}")
-                message.nack()
+                self._on_message_failure(message, e)
         
         # 配置 Flow Control 以避免資源耗盡
         flow_control = FlowControl(

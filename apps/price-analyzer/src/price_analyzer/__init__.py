@@ -16,7 +16,7 @@ import threading
 
 from config import config
 from pubsub import PubSubPublisher, PubSubSubscriber
-from firestore_writer import FirestoreWriter
+from firestore_writer import AsyncFirestoreWriter, FirestoreWriter
 from trading_calendar import ActiveWindow, ShouldContinue, run_session_loop
 from .strategy import LongShortAnalyzer, TickData
 from .minute_aggregator import MinuteAggregator, MinuteBar, SecondBar, now_taipei
@@ -71,7 +71,7 @@ def on_minute_complete(minute_bar: MinuteBar, firestore_writer: FirestoreWriter,
             document_id=doc_id
         )
         
-        print(f"💾 已儲存分鐘資料: {code}/{minute_bar.date.replace('-', '')}/{doc_id} "
+        print(f"💾 已送出分鐘資料寫入: {code}/{minute_bar.date.replace('-', '')}/{doc_id} "
               f"(O:{minute_bar.open} H:{minute_bar.high} L:{minute_bar.low} C:{minute_bar.close} "
               f"V:{minute_bar.volume})\n")
         
@@ -96,23 +96,70 @@ def on_second_data_complete(second_bar: SecondBar, firestore_writer: FirestoreWr
             document_id=second_bar.time
         )
 
-        print(f"💾 已儲存秒級報價: {code}/{second_bar.date}_tick/{second_bar.time} "
+        print(f"💾 已送出秒級報價寫入: {code}/{second_bar.date}_tick/{second_bar.time} "
               f"(報價 {len(second_bar.prices)} 筆)")
 
     except Exception as e:
         print(f"❌ 儲存秒級報價時發生錯誤: {e}")
 
 
+def on_minute_update(minute_bar: MinuteBar, firestore_writer: FirestoreWriter) -> None:
+    """
+    已寫出的分鐘資料被遲到 tick 更新後補寫 Firestore。
+
+    用 merge 只更新 OHLC、成交量等 bar 欄位，不碰第一次寫入時的 analysis 欄位與 created_at。
+    """
+    try:
+        code = _extract_base_code(minute_bar.code)
+        collection_path = f"market/{code}/{minute_bar.date.replace('-', '')}"
+
+        firestore_writer.write_document(
+            collection=collection_path,
+            data=minute_bar.to_dict(),
+            document_id=minute_bar.time,
+            merge=True,
+            set_created_at=False,
+        )
+
+        print(f"💾 已送出分鐘資料補寫: {code}/{minute_bar.date.replace('-', '')}/{minute_bar.time} "
+              f"(O:{minute_bar.open} H:{minute_bar.high} L:{minute_bar.low} C:{minute_bar.close} "
+              f"V:{minute_bar.volume})")
+
+    except Exception as e:
+        print(f"❌ 補寫分鐘資料時發生錯誤: {type(e).__name__}: {e}")
+
+
+def on_second_data_update(second_bar: SecondBar, firestore_writer: FirestoreWriter) -> None:
+    """已寫出的秒級報價明細被遲到 tick 更新後補寫 Firestore（merge，不重設 created_at）"""
+    try:
+        code = _extract_base_code(second_bar.code)
+        collection_path = f"market/{code}/{second_bar.date}_tick"
+
+        firestore_writer.write_document(
+            collection=collection_path,
+            data=second_bar.prices,
+            document_id=second_bar.time,
+            merge=True,
+            set_created_at=False,
+        )
+
+        print(f"💾 已送出秒級報價補寫: {code}/{second_bar.date}_tick/{second_bar.time} "
+              f"(報價 {len(second_bar.prices)} 筆)")
+
+    except Exception as e:
+        print(f"❌ 補寫秒級報價時發生錯誤: {type(e).__name__}: {e}")
+
+
 def schedule_auto_flush(aggregator: MinuteAggregator, timer_lock: threading.Lock, timer_ref: dict):
     """
     每秒執行一次的背景定時器。
 
-    同時負責兩件事：秒級報價取樣（原 price-broadcaster 職責）與分鐘 OHLC 逾時保險 flush，
-    統一成單一 timer 執行緒，避免多個背景執行緒同時存取聚合器的共用狀態。
+    負責聚合器的定時維護：完成該結束的秒級明細、分鐘 OHLC 逾時保險 flush、
+    以及補寫被遲到 tick 更新過的 bar；統一成單一 timer 執行緒，
+    避免多個背景執行緒同時存取聚合器的共用狀態。
     """
     try:
-        aggregator.sample_current_second()
-        aggregator.auto_flush_if_needed(delay_minutes=1.5)
+        aggregator.run_maintenance(delay_minutes=1.5)
     except Exception as e:
         print(f"⚠️  自動 flush 時發生錯誤: {e}")
 
@@ -146,15 +193,7 @@ def handle_message(data: dict, analyzer: LongShortAnalyzer, aggregator: MinuteAg
         # 轉換為 TickData 物件
         tick = dict_to_tick(data)
 
-        # 記錄這筆 tick 的報價，供每秒取樣重建秒級明細（原 price-broadcaster 職責）
-        aggregator.record_tick_price(
-            code=tick.code,
-            price=float(tick.close),
-            underlying_price=float(tick.underlying_price),
-            volume=tick.volume,
-        )
-
-         # 執行多空比分析（保留在記憶體中)
+        # 執行多空比分析（保留在記憶體中；遲到的 tick 不納入分析）
         analysis_result = analyzer.analyze(tick)
         
         # if analysis_result:
@@ -164,7 +203,7 @@ def handle_message(data: dict, analyzer: LongShortAnalyzer, aggregator: MinuteAg
         #           f"多:{analysis_result.long_ratio:.1f}% 空:{analysis_result.short_ratio:.1f}% | "
         #           f"買:{window_1m.buy_volume} 賣:{window_1m.sell_volume} ")
         
-        # 加入分鐘聚合器
+        # 加入分鐘聚合器（同時以 tick 時間重建秒級明細；遲到的 tick 會更新對應的舊 bar）
         completed_bar = aggregator.add_tick(tick)
         # completed_bar 會在回調函數中自動處理
         
@@ -264,9 +303,14 @@ def run_analyzer_session(should_continue: ShouldContinue) -> None:
     watcher_stop = threading.Event()
 
     # 收尾動作依註冊順序的相反順序執行：
-    # 停止監看 -> 關閉訂閱（不再收新 tick）-> 停止定時器 -> flush 剩餘資料 -> 關閉 Firestore
+    # 停止監看 -> 關閉訂閱（不再收新 tick）-> 停止定時器 -> flush 剩餘資料
+    # -> 等寫入佇列清空 -> 關閉 Firestore 連線
     with ExitStack() as cleanup:
-        firestore_writer = FirestoreWriter(project_id=config['gcp_project_id'])
+        sync_writer = FirestoreWriter(project_id=config['gcp_project_id'])
+        cleanup.callback(sync_writer.close)
+
+        # 寫入交給獨立 worker 執行緒，Firestore 的延遲與重試不會卡住 tick 處理
+        firestore_writer = AsyncFirestoreWriter(sync_writer)
         cleanup.callback(firestore_writer.close)
 
         # 初始化多空比分析器
@@ -276,6 +320,8 @@ def run_analyzer_session(should_continue: ShouldContinue) -> None:
         aggregator = MinuteAggregator(
             on_minute_complete=lambda bar: on_minute_complete(bar, firestore_writer, analyzer),
             on_second_data_complete=lambda second_bar: on_second_data_complete(second_bar, firestore_writer),
+            on_minute_update=lambda bar: on_minute_update(bar, firestore_writer),
+            on_second_data_update=lambda second_bar: on_second_data_update(second_bar, firestore_writer),
         )
         cleanup.callback(flush_remaining, aggregator)
 
