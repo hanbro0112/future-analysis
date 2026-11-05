@@ -9,6 +9,7 @@ import { useState, useCallback, useMemo } from 'react';
 import useSWR, { useSWRConfig } from 'swr';
 import { storage } from '../lib/firebase';
 import { ref, getDownloadURL } from 'firebase/storage';
+import { getDateOffsetTradingDays, getLastTradingDay } from '../lib/tradingCalendar';
 
 interface ChipReportCardProps {
   className?: string;
@@ -38,44 +39,12 @@ export const getChipReportDate = (now: Date = new Date()): Date => {
     dateForReport.setDate(dateForReport.getDate() - 1);
   }
   
-  // 排除週末
+  // 排除週末與國定假日
   return getLastTradingDay(dateForReport);
 };
 
-/**
- * 獲取最近的交易日（排除週末）
- */
-const getLastTradingDay = (date: Date): Date => {
-  const result = new Date(date);
-  const day = result.getDay();
-  
-  // 如果是週六，往前推到週五
-  if (day === 6) {
-    result.setDate(result.getDate() - 1);
-  }
-  // 如果是週日，往前推到週五
-  else if (day === 0) {
-    result.setDate(result.getDate() - 2);
-  }
-  
-  return result;
-};
-
-/**
- * 從指定日期往前推算 N 個交易日（略過週六、週日）
- */
-export const getDateOffsetTradingDays = (date: Date, daysBack: number): Date => {
-  const result = new Date(date);
-  let remaining = daysBack;
-  while (remaining > 0) {
-    result.setDate(result.getDate() - 1);
-    const day = result.getDay();
-    if (day !== 0 && day !== 6) {
-      remaining -= 1;
-    }
-  }
-  return result;
-};
+// 交易日判斷（含國定假日）集中在 tradingCalendar，這裡轉出以維持既有匯入路徑
+export { getDateOffsetTradingDays };
 
 /**
  * 格式化日期為 YYYYMMDD

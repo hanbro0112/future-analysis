@@ -20,6 +20,20 @@
 > 或在例外檔補日期。例外檔讀取失敗時會忽略例外並印出錯誤：把休市日當成交易日只是空轉，
 > 反過來把交易日當成休市日會漏資料。
 
+## 前端休市日資料
+
+前端（`web/app/lib/tradingCalendar.ts`）沒有 `holidays` 套件，改讀這裡匯出的靜態 JSON，
+判斷順序與 `is_trading_day` 相同（含例外檔）。每年年初、升級 `holidays` 或調整 `overrides.toml` 後重新匯出：
+
+```bash
+cd apps/libs/trading-calendar
+uv run python -m trading_calendar.export_calendar --output ../../../web/app/lib/tradingCalendar.data.json
+```
+
+- 預設匯出「去年到明年」三年，可用 `--start-year` / `--end-year` 指定
+- `web` 的部署流程（`deploy-web.yml`）建置前會自動重新匯出，本機也可在 `web/` 執行 `npm run export:calendar`
+- 提交進 repo 的 JSON 是本機開發與測試使用的快照，部署以流程中重新匯出的結果為準
+
 ## 使用方式
 
 ```python

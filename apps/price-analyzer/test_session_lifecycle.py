@@ -48,7 +48,9 @@ class FakeFirestoreWriter:
         self.closed = False
         FakeFirestoreWriter.instances.append(self)
 
-    def write_document(self, collection: str, data: dict, document_id: str) -> None:
+    def write_document(
+        self, collection: str, data: dict, document_id: str, merge: bool = False, set_created_at: bool = True
+    ) -> None:
         self.documents.append((collection, document_id))
 
     def close(self) -> None:

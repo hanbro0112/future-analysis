@@ -1,6 +1,6 @@
 # Price Listener - 價格監聽服務
 
-透過永豐證券 Shioaji API 監聽台指期（`MXFR1`）逐筆報價（tick），發布到 Pub/Sub 供下游服務消費。常駐運行（Cloud Run 或 GCE），自己依交易日曆決定何時登入、何時收尾。
+透過永豐證券 Shioaji API 監聽台指期（`MXFR1`）逐筆報價（tick），發布到 Pub/Sub 供下游服務消費。以 Docker 容器常駐運行（目前部署在 GCE VM，亦相容 Cloud Run），自己依交易日曆決定何時登入、何時收尾。
 
 ## 功能
 
@@ -12,8 +12,8 @@
 - 定期（每 60 秒）背景檢查連線與訂閱狀態，啟用窗口內斷線會自動觸發重連
 - 合約訂閱失敗自動重試：`subscribe_contracts` 內建重試（處理冷啟動時合約清單尚未下載完成），若仍失敗，啟用窗口內背景檢查會持續重新訂閱，不需整個重新登入
 - 登入或初始化失敗不會結束 process，下一分鐘自動重試；登入後憑證啟用失敗會先登出，避免佔用連線數
-- 內建極簡 HTTP health check server（`GET /` 回 200），供 Cloud Run 判斷服務存活
-- 收到 `SIGTERM`（Cloud Run / Docker 關閉服務）或 `Ctrl+C` 時結束目前時段：登出並印出 API 用量報告後離開
+- 內建極簡 HTTP health check server（`GET /` 回 200，埠號取 `PORT`，預設 8080），供 Cloud Run 判斷服務存活；GCE 版本不對外開放此埠
+- 收到 `SIGTERM`（`docker compose up -d` 重建容器、Cloud Run 關閉服務）或 `Ctrl+C` 時結束目前時段：登出並印出 API 用量報告後離開。GCE 的 compose 設定了 `stop_grace_period: 30s`，讓登出有足夠時間完成（沒登出會佔住 Shioaji 連線數）
 
 ## 元件說明
 
@@ -58,5 +58,15 @@ uv run --package price-listener python -m price-listener.main
 ```
 
 ## 部署
+
+### GCE（目前使用）
+
+由 [.github/workflows/deploy-apps-gce.yml](../../.github/workflows/deploy-apps-gce.yml) 建置 image 並推送到 Artifact Registry，再透過 IAP SSH 在 VM 上以 Docker Compose 重啟。設定與一次性建置步驟見 [infra/gce/README.md](../../infra/gce/README.md)。
+
+- API 金鑰與 CA 憑證由 VM 上的 `deploy.sh` 從 Secret Manager 讀出，寫成 `.env`（`API_KEY` / `SECRET_KEY` / `CA_PASSWORD`）與 `certs/ca.pfx`（掛載為 `/secrets/ca.pfx`，即 `CA_CERT_PATH`）
+- VM 的 service account 需要 `roles/pubsub.editor`：啟動時會檢查 topic 是否存在，不存在就自動建立
+- 部署會重啟服務，重啟期間 listener 不發布，**這段時間的 tick 會遺失**，請避開交易時段（13:50–14:55 或休市日）
+
+### Cloud Run（舊版，歷史參考）
 
 由 [.github/workflows/deploy-apps.yml](../../.github/workflows/deploy-apps.yml) 建置並部署到 Cloud Run（`--ingress=internal`，需搭配 Secret Manager 掛載 API 金鑰與 CA 憑證）。

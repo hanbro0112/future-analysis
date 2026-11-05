@@ -41,10 +41,10 @@ PDF 格式可能會變動，需要調整裁切座標。
 ```python
 class ChipReportProcessor:
     # 小台 (MTX) 散戶多空比圖表座標 (x0, y0, x1, y1)
-    SMALL_FUTURES_CHART_BBOX = (50, 200, 550, 450)
+    SMALL_FUTURES_CHART_BBOX = (0, 810, 560, 1157)
 
     # 微台 (TMF) 散戶多空比圖表座標 (x0, y0, x1, y1)
-    MICRO_FUTURES_CHART_BBOX = (50, 500, 550, 750)
+    MICRO_FUTURES_CHART_BBOX = (0, 1154, 560, 1500)
 ```
 
 ### 步驟 3: 使用測試腳本驗證

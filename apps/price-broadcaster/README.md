@@ -9,7 +9,7 @@ FastAPI WebSocket 即時報價伺服器，提供每秒一次的報價廣播。
 
 1. **即時報價廣播**：透過 WebSocket 每秒發送最新報價
 2. **完整報價資訊**：包含成交價、加權指數、每秒總成交量
-3. **Pub/Sub 訂閱**：從 Firestore Pub/Sub 接收 tick 資料
+3. **Pub/Sub 訂閱**：從 Pub/Sub（`price-broadcaster-subscription`）接收 tick 資料
 4. **價格聚合**：同一秒內多筆成交取最新價格
 5. **成交量累計**：自動累計每秒所有 tick 的成交量
 6. **WebSocket 連接管理**：自動清理斷開連接
@@ -48,13 +48,35 @@ cd apps
 # 安裝依賴
 uv sync
 
-# 啟動服務
-uv run --package price-broadcaster python -m price_broadcaster.main
+# 啟動服務（預設埠 8080；前端本地預設連 8001，所以本地開發請指定 PORT=8001）
+PORT=8001 uv run --package price-broadcaster python -m price-broadcaster.main
 ```
+
+## 部署
+
+### GCE（目前使用）
+
+由 [.github/workflows/deploy-apps-gce.yml](../../.github/workflows/deploy-apps-gce.yml) 建置 image 並推送到 Artifact Registry，再透過 IAP SSH 在 VM 上以 Docker Compose 重啟，設定見 [infra/gce/README.md](../../infra/gce/README.md)。
+
+```
+瀏覽器 ──wss──▶ Cloudflare Proxy (ws.txfutures.com)
+                     │ 443（Origin CA，SSL Full strict）
+                     ▼
+              caddy ──▶ price-broadcaster:8080（compose 內部網路，不對外開放）
+```
+
+- 容器只 `expose: 8080`，對外只有 Caddy 的 443；Caddy 憑證為 Cloudflare Origin CA，不是 Let's Encrypt
+- 前端建置時以 `NEXT_PUBLIC_WS_URL=wss://ws.txfutures.com` 指向此端點（`/ws/price` 路徑由前端補上）
+- `/health` 經 Cloudflare 可用 `curl https://ws.txfutures.com/health` 驗證
+- 重啟期間 tick 會留在 Pub/Sub 重啟後補送，但已連線的 WebSocket 客戶端會被中斷，前端會自動重連
+
+### Cloud Run（舊版，歷史參考）
+
+由 [.github/workflows/deploy-apps.yml](../../.github/workflows/deploy-apps.yml) 部署（`--allow-unauthenticated`，瀏覽器直連 Cloud Run 網址）。
 
 ## API 端點
 
-- `GET /`：服務狀態
+- `GET /`：服務狀態（埠號取環境變數 `PORT`，預設 8080）
 - `GET /health`：健康檢查（包含連接數和最新報價）
 - `WS /ws/price`：WebSocket 報價訂閱
 
@@ -122,6 +144,8 @@ price-broadcaster/
 ├── pyproject.toml             # 專案配置
 ├── README.md                  # 說明文件
 ├── test_ws_client.py          # WebSocket 測試客戶端
+├── test_auth.py               # Firebase ID Token 驗證測試
+├── test_session_lifecycle.py  # 時段生命週期測試
 └── src/
     └── price_broadcaster/
         ├── __init__.py        # FastAPI 應用和 WebSocket 邏輯

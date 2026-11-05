@@ -17,7 +17,7 @@
 - 寫入 Firestore：`market/{商品代碼}/{YYYYMMDD}/{HHMM}`
 
 ### 秒級報價明細（原 price-broadcaster 職責）
-- 每秒取樣目前已知的最新報價（price、underlying_price、每秒總成交量）
+- 以 tick 自己的時間戳歸屬到對應的秒（price 取該秒時間最晚的一筆、underlying_price 同步、volume 為該秒總成交量），處理落後也不會錯位
 - 缺秒前向填充：缺失的秒數只填充 `price` 欄位；本分鐘第 0 秒缺失時使用上一分鐘最後價格
 - 夜盤跨日處理：00:00-05:59 的資料儲存到前一天
 - 只在交易時段內才寫入，非交易時段的秒級資料會被捨棄
@@ -25,10 +25,25 @@
 
 ## Flush 機制
 
-分鐘 OHLC 與秒級明細共用同一個每秒觸發的背景定時器（`schedule_auto_flush`），而非各自獨立排程：
-- **每秒取樣**：`MinuteAggregator.sample_current_second()` 取樣秒級報價，並在偵測到分鐘邊界時完成上一分鐘的秒級明細
-- **逾時保險 flush**：`MinuteAggregator.auto_flush_if_needed(delay_minutes=1.5)` 檢查是否有分鐘 OHLC 因為沒有新 tick 到達而卡住，超過門檻就強制完成
+分鐘 OHLC 與秒級明細共用同一個每秒觸發的背景定時器（`schedule_auto_flush`，呼叫 `MinuteAggregator.run_maintenance()`），而非各自獨立排程：
+- **秒級明細 finalize**：`finalize_seconds_if_needed()` 以 wall clock 偵測分鐘邊界，完成更早分鐘的秒級明細
+- **逾時保險 flush**：`auto_flush_if_needed(delay_minutes=1.5)` 檢查是否有分鐘 OHLC 因為沒有新 tick 到達而卡住，超過門檻就強制完成
+- **補寫 dirty bar**：`flush_dirty_if_needed()` 每分鐘檢查一次（見下節）
 - 分鐘 OHLC 的即時 finalize 仍由 tick 驅動（新分鐘的 tick 到達時，自動完成上一分鐘），定時器只是保險機制
+
+## 遲到（亂序）tick
+
+- 分鐘與秒級明細的 finalize 時機不變，給前端的資料固定在同樣的時間點寫出
+- finalize 後的 bar 在整個時段內保留在記憶體；遲到 tick 直接更新對應的舊 bar（open 取時間最早、close 取時間最晚），並標記為 dirty
+- dirty bar 每 1 分鐘補寫一次，但只補寫「分鐘結束後已過 5 分鐘」的；收盤（`flush_all`）時一次補寫全部。補寫用 merge，不會動到 `analysis` 與 `created_at`
+- 記憶體中沒有對應 bar 的遲到 tick（例如服務重啟後）會被丟棄並計數，避免用單筆資料覆蓋已完整的文件
+- 遲到 tick 不納入多空比等即時分析（視窗統計假設 tick 依時間遞增）
+
+## 寫入與效能
+
+- Firestore 寫入由 `AsyncFirestoreWriter` 的獨立 worker 執行緒執行，不會卡住 tick 處理；收尾時會等佇列寫完才關閉連線
+- 多空比分析的各時間視窗（1／5／30 分鐘）以增量方式維護（`SlidingWindow`），每筆 tick 的成本不隨視窗大小成長
+- 訂閱的訊息處理失敗一律 ack（`PubSubSubscriber._on_message_failure` 為日後調整策略的單一出口）
 
 ## 元件說明
 
@@ -46,6 +61,9 @@
 GCP_PROJECT_ID=demo-project
 PUBSUB_TOPIC_ID=price-updates
 PUBSUB_SUBSCRIPTION_ID_ANALYZER=price-analyzer-subscription
+
+# 健康檢查埠（選填，預設 8080）
+PORT=8080
 
 # Firestore Emulator (開發環境)
 FIRESTORE_EMULATOR_HOST=localhost:8080
@@ -65,5 +83,21 @@ uv sync
 
 ```bash
 cd apps
-uv run --package price-analyzer python -m price_analyzer.main
+uv run --package price-analyzer python -m price-analyzer.main
 ```
+
+## 部署
+
+### GCE（目前使用）
+
+由 [.github/workflows/deploy-apps-gce.yml](../../.github/workflows/deploy-apps-gce.yml) 建置 image 並推送到 Artifact Registry，再透過 IAP SSH 在 VM 上以 Docker Compose 重啟，設定見 [infra/gce/README.md](../../infra/gce/README.md)。
+
+- 與 price-listener、price-broadcaster 共用同一個 `IMAGE_TAG`，三個服務固定一起部署
+- 環境變數由 VM 上的 `deploy.sh` 寫入 `.env`；VM 的 service account 需要 `roles/datastore.user`（寫 Firestore）與 `roles/pubsub.editor`（訂閱不存在時自動建立）
+- 內建極簡 health check server（`GET /`，埠號取 `PORT`，預設 8080），供 Cloud Run 判斷存活；GCE 版本不對外開放
+- compose 設定 `stop_grace_period: 30s`，讓收到 `SIGTERM` 後有足夠時間 flush 未完成的分鐘與秒級資料
+- 重啟期間 tick 會留在 Pub/Sub，重啟後補送，但重啟那一分鐘的 OHLC 與成交量不完整，多空比分析視窗會重新累積，請避開交易時段部署
+
+### Cloud Run（舊版，歷史參考）
+
+由 [.github/workflows/deploy-apps.yml](../../.github/workflows/deploy-apps.yml) 部署（`--ingress=internal`）。

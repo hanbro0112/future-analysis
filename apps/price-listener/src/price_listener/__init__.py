@@ -58,7 +58,8 @@ def init_pubsub() -> None:
     topic_id = config["pubsub_topic_id"]
 
     try:
-        pubsub_publisher = PubSubPublisher(project_id=project_id)
+        # async_mode：報價回調改用非同步發布，topic 只在這裡確認一次
+        pubsub_publisher = PubSubPublisher(project_id=project_id, async_mode=True)
         # 等待 topic 建立完成 - ensure_topic_exists() 是同步調用，會等待建立完成
         pubsub_publisher.ensure_topic_exists(topic_id)
         print(f"✅ Pub/Sub 初始化成功，Topic: {topic_id}")
@@ -105,14 +106,14 @@ def quote_callback(tick: TickFOPv1):
             "simtrade": tick.simtrade,
         }
         
-        # 發布到 Pub/Sub
-        message_id = pubsub_publisher.publish_message(
+        # 非同步發布到 Pub/Sub：只交給批次佇列就返回，不阻塞 Shioaji 回調執行緒；
+        # 送達結果與失敗由 publisher 內部統計（見 PubSubPublisher.get_publish_stats）
+        pubsub_publisher.publish_message_async(
             topic_id=topic_id,
             data=message_data,
             source="price-listener"
         )
-        # print(f"📤 已發布到 Pub/Sub，訊息 ID: {message_id}")
-        
+
     except Exception as e:
         print(f"❌ 發送訊息到 Pub/Sub 失敗: {e}")
 
