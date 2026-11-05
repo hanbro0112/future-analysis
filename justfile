@@ -13,7 +13,7 @@ ROOT_DIR := justfile_directory()
 
 dev:
     docker compose up -d
-    cd apps && uv sync && uv run main
+    cd apps && uv sync
 
 tmp:
     cd apps && uv sync --package price-analyzer && uv run --package price-analyzer python -m price-analyzer.main
