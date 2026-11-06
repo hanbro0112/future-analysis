@@ -10,6 +10,10 @@
 - 將 tick 展開為 Pub/Sub 訊息（`topic: price-updates`）發布
 - 斷線自動重連：偵測 Session down 事件，啟用窗口內以指數退避重試，最多 5 次；重連或收尾期間舊連線觸發的斷線事件會被忽略
 - 定期（每 60 秒）背景檢查連線與訂閱狀態，啟用窗口內斷線會自動觸發重連
+- tick 看門狗：連線與訂閱旗標都正常、但「正式交易時段內」超過 120 秒（`TICK_STALE_SECONDS`）沒收到正式 tick 時自動修復。第一次先取消並重新訂閱，仍沒有 tick 才重新登入；收到 tick 即重置。開盤前預熱、剛開盤未滿 120 秒、休市與收盤寬限期不會誤判（判斷見 `is_tick_stale`）。「最後 tick 時間」只是一個由回調寫入的 `time.monotonic()` 變數，不加 Lock
+- 每分鐘心跳 log：`💓 心跳｜近 1 分鐘 tick N 筆（發布成功 / 失敗 / 丟棄）｜距最後 tick X 秒`。tick 數取自 publisher 統計的差值。沒訊息時先看這行：tick 數為 0 代表上游沒資料，有 tick 但失敗或丟棄偏高代表發布層有問題
+- 發布層自癒：心跳間隔內「完全沒有發布成功、卻有失敗或丟棄」時，重建 Pub/Sub Publisher（重新確認 topic）；重建失敗則保留舊的，下一分鐘再試
+- logout 超時保護：登出（重連、收尾、登入失敗清理）最多等 10 秒（`LOGOUT_TIMEOUT_SECONDS`），超時就放棄等待，避免 Shioaji 呼叫卡住拖垮單一執行緒的時段迴圈
 - 合約訂閱失敗自動重試：`subscribe_contracts` 內建重試（處理冷啟動時合約清單尚未下載完成），若仍失敗，啟用窗口內背景檢查會持續重新訂閱，不需整個重新登入
 - 登入或初始化失敗不會結束 process，下一分鐘自動重試；登入後憑證啟用失敗會先登出，避免佔用連線數
 - 內建極簡 HTTP health check server（`GET /` 回 200，埠號取 `PORT`，預設 8080），供 Cloud Run 判斷服務存活；GCE 版本不對外開放此埠
@@ -31,6 +35,9 @@
 - `quote_callback(tick)`：tick 回調，轉換欄位並發布到 Pub/Sub
 - `subscribe_contracts(api)`：訂閱合約，查詢合約清單失敗時會重試，回傳是否全部訂閱成功
 - `on_session_down` / `reconnect` / `check_and_reconnect`：斷線偵測與自動重連、合約訂閱失敗重試
+- `check_tick_watchdog(now)` / `is_tick_stale(...)` / `resubscribe_contracts(api)`：tick 停滯偵測與修復
+- `run_health_checks()`：每 60 秒執行，印心跳、必要時重建 Publisher（`rebuild_publisher`），再做連線檢查
+- `safe_logout(api)` / `call_with_timeout(...)`：帶 timeout 的登出
 - `check_usage(api)`：登出前印出 Shioaji API 流量使用量
 
 ## 環境變數
