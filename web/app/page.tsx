@@ -29,12 +29,18 @@ import {
   getNightSessionDate as getNightSessionCollectionDate,
   getLatestBarTimestamp,
   mergeMinuteBars,
-  formatDateToYYYYMMDD,
-  getLastTradingDay,
   getTodayDailyReport,
   type DailyReport
 } from './lib/firestoreApi';
-import { isTradingDay } from './lib/tradingCalendar';
+import {
+  getDaySessionDateKey,
+  getDefaultMarketType,
+  getNightSessionDateKey,
+  getReferencePriceDates,
+  shouldSkipHistoryPolling,
+  type MarketType,
+  type ReferencePriceDates
+} from './lib/marketSession';
 import type { TaifexQuote } from './types/futures';
 import type { MinuteBar, MinuteChartPoint, AnalysisResult } from './types/minuteData';
 
@@ -43,115 +49,22 @@ import type { MinuteBar, MinuteChartPoint, AnalysisResult } from './types/minute
 const WS_URL = resolveWsUrl(process.env.NEXT_PUBLIC_WS_URL);
 
 /**
- * 根據當前時間判斷預設盤面類型（包含延後 3 分鐘以更新最後一筆資料）
- * - 日盤時段（週一至週五 08:45-13:48）=> 'regular'
- * - 夜盤時段（週一至週五 15:00-次日 05:03）=> 'after_hours'
- * - 週六、週日與國定假日全天 => 'after_hours'（顯示前一交易日夜盤資料）
+ * 將 YYYY-MM-DD 格式化為 MM/DD
  */
-const getDefaultMarketType = (): 'regular' | 'after_hours' => {
-  const now = new Date();
-  const hours = now.getHours();
-  const minutes = now.getMinutes();
-  const totalMinutes = hours * 60 + minutes;
-
-  // 週末與國定假日全天 => 夜盤
-  if (!isTradingDay(now)) {
-    return 'after_hours';
-  }
-
-  // 交易日判斷時間段
-  // 日盤時段：08:45-13:48 (525-828 分鐘) - 延後 3 分鐘以更新最後一筆
-  const daySessionStart = 8 * 60 + 45; // 525
-  const daySessionEnd = 13 * 60 + 48; // 828 (原本 13:45 + 3 分鐘)
-
-  // 夜盤時段：15:00-05:03 - 延後 3 分鐘以更新最後一筆
-  const nightSessionStart = 15 * 60; // 900
-
-  if (totalMinutes >= daySessionStart && totalMinutes <= daySessionEnd) {
-    // 日盤時段
-    return 'regular';
-  } else if (totalMinutes >= nightSessionStart || totalMinutes < 5 * 60 + 3) {
-    // 夜盤時段（15:00 之後或 05:03 之前）
-    return 'after_hours';
-  } else {
-    // 其他時間（05:03-08:45 或 13:48-15:00）=> 預設夜盤
-    return 'after_hours';
-  }
-};
-
-/**
- * 獲取日盤的交易日期
- * 邏輯：08:30 前顯示前一個交易日的日盤
- * @returns 當前交易日
- */
-const getDaySessionDate = (): Date => {
-  const now = new Date();
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  const timeInMinutes = hour * 60 + minute;
-  
-  // 08:30 前使用前一天的日期
-  let dateForSession = now;
-  if (timeInMinutes < 8 * 60 + 30) {  // 小於 08:30
-    dateForSession = new Date(now);
-    dateForSession.setDate(dateForSession.getDate() - 1);
-  }
-  
-  return getLastTradingDay(dateForSession);
-};
-
-/**
- * 判斷當前是否在交易時段內（包含延後 3 分鐘以更新最後一筆資料）
- * @returns 是否在交易時段（日盤或夜盤）
- */
-
-
-/**
- * 獲取夜盤的交易日期
- * 夜盤跨日邏輯：
- * - 00:00-14:49 使用前一天的夜盤資料
- * - 14:50-23:59 使用當天的夜盤資料
- * @returns 夜盤對應的交易日
- */
-const getNightSessionDate = (): Date => {
-  const now = new Date();
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  const timeInMinutes = hour * 60 + minute;
-  
-  // 14:50 前使用前一天的日期
-  let dateForQuery = now;
-  if (timeInMinutes < 14 * 60 + 50) {  // 小於 14:50
-    dateForQuery = new Date(now);
-    dateForQuery.setDate(dateForQuery.getDate() - 1);
-  }
-  
-  return getLastTradingDay(dateForQuery);
-};
-
-/**
- * 格式化日期為 MM/DD 格式
- */
-const formatDate = (date: Date): string => {
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const day = date.getDate().toString().padStart(2, '0');
-  return `${month}/${day}`;
-};
+const formatDateKey = (dateKey: string): string => dateKey.slice(5).replace('-', '/');
 
 /**
  * 獲取日盤顯示文字
  */
 const getDaySessionLabel = (): string => {
-  const date = getDaySessionDate();
-  return `日盤 ${formatDate(date)} (08:45-13:45)`;
+  return `日盤 ${formatDateKey(getDaySessionDateKey())} (08:45-13:45)`;
 };
 
 /**
  * 獲取夜盤顯示文字
  */
 const getNightSessionLabel = (): string => {
-  const date = getNightSessionDate();
-  return `夜盤 ${formatDate(date)} (15:00-05:00)`;
+  return `夜盤 ${formatDateKey(getNightSessionDateKey())} (15:00-05:00)`;
 };
 
 export default function Home() {
@@ -178,7 +91,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
   // 供定時器（閉包只建立一次）讀取最新的全部資料，增量合併必須建立在最新資料上
   const allMinuteDataRef = useRef<MinuteBar[]>([]);
   // 各盤別目前已載入的「盤別_集合日期」，一致時只做增量讀取，換日／換集合時改整批重讀
-  const loadedSessionKeysRef = useRef<Record<'regular' | 'after_hours', string | null>>({
+  const loadedSessionKeysRef = useRef<Record<MarketType, string | null>>({
     regular: null,
     after_hours: null
   });
@@ -190,7 +103,9 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const [latestAnalysis, setLatestAnalysis] = useState<AnalysisResult | null>(null);
   const [latestTime, setLatestTime] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
-  const [marketType, setMarketType] = useState<'regular' | 'after_hours'>(getDefaultMarketType()); // 根據當前時間判斷預設盤面
+  const [marketType, setMarketType] = useState<MarketType>(getDefaultMarketType()); // 根據當前時間判斷預設盤面
+  // 目前參考價對應的日期，跨日／換盤後與最新日期不同時需重新取得參考價
+  const referenceDatesRef = useRef<ReferencePriceDates | null>(null);
   const [isMarketTypeManuallySelected, setIsMarketTypeManuallySelected] = useState(false);
   const [dayReferencePrice, setDayReferencePrice] = useState<number | null>(null); // 日盤漲跌幅參考價
   const [nightReferencePrice, setNightReferencePrice] = useState<number | null>(null); // 夜盤漲跌幅參考價
@@ -236,39 +151,20 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
     return marketType === 'regular' ? dayReferencePrice : nightReferencePrice;
   }, [marketType, dayReferencePrice, nightReferencePrice]);
 
-  const resolveMarketType = (
-    data: MinuteBar[],
-    preferredMarketType: 'regular' | 'after_hours'
-  ): 'regular' | 'after_hours' => {
-    const hasPreferredData = data.some(bar => bar.market_type === preferredMarketType);
-
-    if (hasPreferredData) {
-      return preferredMarketType;
-    }
-
-    // 若偏好盤面沒有資料，退回最新資料所屬盤面
-    return data[data.length - 1].market_type;
-  };
-
   /**
    * 取得日盤與夜盤的參考價（用於漲跌幅計算），只靠日期推算，不需等分鐘資料載入
-   * - 夜盤：使用當天日盤收盤價
+   * - 夜盤：使用夜盤所屬交易日當天的日盤收盤價
    * - 日盤：使用前一交易日日盤收盤價
    * 兩個收盤價各只讀一筆文件並行取得，讀不到時回傳 null（由呼叫端退回開盤價）
    */
-  const fetchReferencePrices = async (): Promise<{ day: number | null; night: number | null }> => {
-    const dayDate = getDaySessionDate();
-    const previousDay = new Date(dayDate);
-    previousDay.setDate(previousDay.getDate() - 1);
-
-    const dayRefDateStr = formatDateToYYYYMMDD(getLastTradingDay(previousDay));
-    const nightRefDateStr = formatDateToYYYYMMDD(getNightSessionDate());
-
+  const fetchReferencePrices = async (
+    dates: ReferencePriceDates
+  ): Promise<{ day: number | null; night: number | null }> => {
     const [day, night] = await Promise.all([
-      getDaySessionClosePrice('MXF', dayRefDateStr),
-      getDaySessionClosePrice('MXF', nightRefDateStr)
+      getDaySessionClosePrice('MXF', dates.day),
+      getDaySessionClosePrice('MXF', dates.night)
     ]);
-    console.log('🔵 參考價 - 日盤（前一交易日收盤）:', day, dayRefDateStr, '夜盤（當天日盤收盤）:', night, nightRefDateStr);
+    console.log('🔵 參考價 - 日盤（前一交易日收盤）:', day, dates.day, '夜盤（當天日盤收盤）:', night, dates.night);
     return { day, night };
   };
 
@@ -360,99 +256,97 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
       
       try {
         // 分鐘資料與參考價並行取得，全部就緒後才一起更新狀態，避免定時器拿到尚未算出的參考價
+        // 參考價對應的日期一併記錄，之後跨日／換盤時才知道要重新取得
+        const referenceDates = getReferencePriceDates();
         const [data, referencePrices] = await Promise.all([
           getTodayMinuteData('MXF'), // 台指期商品代碼
-          fetchReferencePrices()
+          fetchReferencePrices(referenceDates)
         ]);
-        
+        referenceDatesRef.current = referenceDates;
+
         // 記錄初始載入的集合日期，之後的輪詢才知道可以用增量讀取
         loadedSessionKeysRef.current = {
           regular: `regular_${getDaySessionCollectionDate()}`,
           after_hours: `after_hours_${getNightSessionCollectionDate()}`
         };
 
-        if (data.length > 0) {
-          allMinuteDataRef.current = data;
-          setAllMinuteData(data); // 儲存所有資料
+        allMinuteDataRef.current = data;
+        setAllMinuteData(data); // 儲存所有資料
 
-          // 預設使用時間判斷的盤面，若無資料則退回最新資料盤面
-          const defaultMarketType = getDefaultMarketType();
-          const resolvedMarketType = resolveMarketType(data, defaultMarketType);
-          setMarketType(resolvedMarketType);
+        // 依時間規則決定盤面；該盤沒有資料就顯示空盤，不退回另一盤（休市日由日期推算前一交易日）
+        const resolvedMarketType = getDefaultMarketType();
+        setMarketType(resolvedMarketType);
 
-          // 分離日盤和夜盤數據
-          const dayData = data.filter(bar => bar.market_type === 'regular');
-          const nightData = data.filter(bar => bar.market_type === 'after_hours');
+        // 分離日盤和夜盤數據
+        const dayData = data.filter(bar => bar.market_type === 'regular');
+        const nightData = data.filter(bar => bar.market_type === 'after_hours');
 
-          // 轉換為圖表資料 - 日盤
-          const dayChartPoints: MinuteChartPoint[] = dayData.map(bar => ({
-            time: bar.time,
-            avg_price: bar.avg_price,
-            high: bar.high,
-            low: bar.low,
-            volume: bar.volume,
-            buy_volume: bar.buy_volume,
-            sell_volume: bar.sell_volume,
-            taiex: bar.analysis?.basis != null ? bar.avg_price - bar.analysis.basis : undefined
-          }));
-          setDayChartData(dayChartPoints);
+        // 轉換為圖表資料 - 日盤
+        const dayChartPoints: MinuteChartPoint[] = dayData.map(bar => ({
+          time: bar.time,
+          avg_price: bar.avg_price,
+          high: bar.high,
+          low: bar.low,
+          volume: bar.volume,
+          buy_volume: bar.buy_volume,
+          sell_volume: bar.sell_volume,
+          taiex: bar.analysis?.basis != null ? bar.avg_price - bar.analysis.basis : undefined
+        }));
+        setDayChartData(dayChartPoints);
 
-          // 轉換為圖表資料 - 夜盤
-          const nightChartPoints: MinuteChartPoint[] = nightData.map(bar => ({
-            time: bar.time,
-            avg_price: bar.avg_price,
-            high: bar.high,
-            low: bar.low,
-            volume: bar.volume,
-            buy_volume: bar.buy_volume,
-            sell_volume: bar.sell_volume
-          }));
-          setNightChartData(nightChartPoints);
+        // 轉換為圖表資料 - 夜盤
+        const nightChartPoints: MinuteChartPoint[] = nightData.map(bar => ({
+          time: bar.time,
+          avg_price: bar.avg_price,
+          high: bar.high,
+          low: bar.low,
+          volume: bar.volume,
+          buy_volume: bar.buy_volume,
+          sell_volume: bar.sell_volume
+        }));
+        setNightChartData(nightChartPoints);
 
-          // 根據解析後的市場類型過濾資料
-          const filteredData = data.filter(bar => bar.market_type === resolvedMarketType);
-          setMinuteData(filteredData);
-          
-          // 轉換為圖表資料（當前顯示的資料，保持向後兼容）
-          const chartPoints: MinuteChartPoint[] = filteredData.map(bar => ({
-            time: bar.time,
-            avg_price: bar.avg_price,
-            high: bar.high,
-            low: bar.low,
-            volume: bar.volume,
-            buy_volume: bar.buy_volume,
-            sell_volume: bar.sell_volume
-          }));
-          setChartData(chartPoints);
-          
-          // 日盤和夜盤的參考價格（用於漲跌幅計算），讀不到時退回當前盤別第一筆開盤價
-          const dayRefPrice = referencePrices.day ?? dayData[0]?.open ?? 0;
-          const nightRefPrice = referencePrices.night ?? nightData[0]?.open ?? 0;
-          setDayReferencePrice(dayRefPrice);
-          setNightReferencePrice(nightRefPrice);
-          console.log('📍 初始化基準價 - 日盤:', dayRefPrice, '夜盤:', nightRefPrice);
-          
-          // 更新報價資訊（依目前盤面）
-          const refPrice = resolvedMarketType === 'regular' ? dayRefPrice : nightRefPrice;
-          const quoteData = generateQuoteFromMinuteData(filteredData, refPrice);
-          setQuote(quoteData);
-          
-          // 取得最新的分析結果
-          const latest = filteredData[filteredData.length - 1];
-          if (latest?.analysis) {
-            setLatestAnalysis(latest.analysis);
-            // 格式化時間：HHMM -> HH:MM
-            const formattedTime = latest.time.length === 4 
-              ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}` 
-              : latest.time;
-            setLatestTime(`${latest.date} ${formattedTime}`);
-          } else {
-            setLatestAnalysis(null);
-            setLatestTime('');
-            console.log('⚠️ 最新資料無分析結果');
-          }
+        // 根據解析後的市場類型過濾資料
+        const filteredData = data.filter(bar => bar.market_type === resolvedMarketType);
+        setMinuteData(filteredData);
+        
+        // 轉換為圖表資料（當前顯示的資料，保持向後兼容）
+        const chartPoints: MinuteChartPoint[] = filteredData.map(bar => ({
+          time: bar.time,
+          avg_price: bar.avg_price,
+          high: bar.high,
+          low: bar.low,
+          volume: bar.volume,
+          buy_volume: bar.buy_volume,
+          sell_volume: bar.sell_volume
+        }));
+        setChartData(chartPoints);
+        
+        // 日盤和夜盤的參考價格（用於漲跌幅計算），讀不到時退回當前盤別第一筆開盤價
+        const dayRefPrice = referencePrices.day ?? dayData[0]?.open ?? 0;
+        const nightRefPrice = referencePrices.night ?? nightData[0]?.open ?? 0;
+        setDayReferencePrice(dayRefPrice);
+        setNightReferencePrice(nightRefPrice);
+        console.log('📍 初始化基準價 - 日盤:', dayRefPrice, '夜盤:', nightRefPrice);
+        
+        // 更新報價資訊（依目前盤面）
+        const refPrice = resolvedMarketType === 'regular' ? dayRefPrice : nightRefPrice;
+        const quoteData = generateQuoteFromMinuteData(filteredData, refPrice);
+        setQuote(quoteData);
+        
+        // 取得最新的分析結果
+        const latest = filteredData[filteredData.length - 1];
+        if (latest?.analysis) {
+          setLatestAnalysis(latest.analysis);
+          // 格式化時間：HHMM -> HH:MM
+          const formattedTime = latest.time.length === 4 
+            ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}` 
+            : latest.time;
+          setLatestTime(`${latest.date} ${formattedTime}`);
         } else {
-          console.log('⚠️ 無資料可載入');
+          setLatestAnalysis(null);
+          setLatestTime('');
+          console.log('⚠️ 最新資料無分析結果');
         }
       } catch (error) {
         console.error('❌ 載入分鐘資料失敗:', error);
@@ -506,12 +400,12 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
     };
   });
 
-  const hasMinuteData = minuteData.length > 0;
+  // 初次載入完成後即啟動定時器；即使目前顯示的盤沒有資料（例如 14:51 剛切到尚未開盤的夜盤）也要持續輪詢
+  const isInitialLoadDone = !isLoading;
 
   // 定期更新分鐘級資料（每分鐘03秒更新一次）
   useEffect(() => {
-    // 只在首次有資料時啟動定時器
-    if (!hasMinuteData) return;
+    if (!isInitialLoadDone) return;
 
     // 計算下一次更新時間（每分鐘的03秒）
     function getNextUpdateDelay() {
@@ -536,11 +430,24 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
       
       isUpdatingRef.current = true;
       
-      // 檢查是否在交易時段內
-      // 條件：如果 websocket 連線正常且沒有手動選擇盤別且不在交易時段，則跳過（有即時資料不需要更新歷史）
-      // 否則：無論是斷線降級或手動選擇，都應該更新
+      // 檢查是否可略過本輪更新
+      // 條件：websocket 連線正常、沒有手動選擇盤別、不在交易時段，且沒有待處理的盤別切換或參考價換日
+      // （有即時資料不需要更新歷史）；否則無論是斷線降級或手動選擇，都應該更新
       const gateState = liveStateRef.current;
-      if (gateState.wsConnected && !gateState.isMarketTypeManuallySelected && !isInTradingHours()) {
+      const referenceDates = getReferencePriceDates();
+      const referenceDatesChanged =
+        referenceDatesRef.current?.day !== referenceDates.day ||
+        referenceDatesRef.current?.night !== referenceDates.night;
+      const marketTypeSwitchPending =
+        !gateState.isMarketTypeManuallySelected && gateState.marketType !== getDefaultMarketType();
+
+      if (shouldSkipHistoryPolling({
+        wsConnected: gateState.wsConnected,
+        isMarketTypeManuallySelected: gateState.isMarketTypeManuallySelected,
+        inTradingHours: isInTradingHours(),
+        marketTypeSwitchPending,
+        referenceDatesChanged
+      })) {
         isUpdatingRef.current = false;
         return;
       }
@@ -548,7 +455,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
       try {
         // 判斷當前應該是什麼時段
         const currentSessionType = getDefaultMarketType();
-        
+
         const currentData = allMinuteDataRef.current;
         const currentSessionBars = currentData.filter(bar => bar.market_type === currentSessionType);
         const collectionDate = currentSessionType === 'regular' ? getDaySessionCollectionDate() : getNightSessionCollectionDate();
@@ -557,6 +464,10 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
 
         let mergedData: MinuteBar[];
         let sessionData: MinuteBar[];
+        // 換日／換集合（例如 14:51 切到當天尚未開盤的夜盤）時，空資料也是合法結果，必須套用到畫面；
+        // 同一集合重讀到空資料則視為暫時性失敗，保留原本畫面
+        const isNewSession =
+          marketTypeSwitchPending || loadedSessionKeysRef.current[currentSessionType] !== sessionKey;
 
         if (loadedSessionKeysRef.current[currentSessionType] === sessionKey && cursor) {
           // 同一個集合：只讀游標之後的新資料（約 1-2 筆）再合併，不重讀整個集合
@@ -575,22 +486,34 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
             ? [...sessionData, ...otherSessionData]  // 日盤在前
             : [...otherSessionData, ...sessionData]; // 夜盤在後
 
-          if (sessionData.length > 0) {
-            loadedSessionKeysRef.current[currentSessionType] = sessionKey;
-          }
+          loadedSessionKeysRef.current[currentSessionType] = sessionKey;
         }
 
-        if (sessionData.length > 0) {
+        if (sessionData.length > 0 || isNewSession || referenceDatesChanged) {
           allMinuteDataRef.current = mergedData;
           setAllMinuteData(mergedData);
 
           // 請求期間使用者可能已切換盤別，這裡重新讀取最新狀態
-          const { isMarketTypeManuallySelected, marketType, dayReferencePrice, nightReferencePrice } = liveStateRef.current;
+          const { isMarketTypeManuallySelected, marketType } = liveStateRef.current;
+          let { dayReferencePrice, nightReferencePrice } = liveStateRef.current;
 
-          const preferredMarketType = isMarketTypeManuallySelected
+          const resolvedMarketType = isMarketTypeManuallySelected
             ? marketType
             : currentSessionType;
-          const resolvedMarketType = resolveMarketType(mergedData, preferredMarketType);
+
+          // 參考價日期已改變（跨日或換盤）：重新取得參考價，讀不到時退回該盤第一筆開盤價
+          if (referenceDatesChanged) {
+            const prices = await fetchReferencePrices(referenceDates);
+            referenceDatesRef.current = referenceDates;
+            dayReferencePrice = prices.day
+              ?? mergedData.find(bar => bar.market_type === 'regular')?.open
+              ?? 0;
+            nightReferencePrice = prices.night
+              ?? mergedData.find(bar => bar.market_type === 'after_hours')?.open
+              ?? 0;
+            setDayReferencePrice(dayReferencePrice);
+            setNightReferencePrice(nightReferencePrice);
+          }
 
           const filteredData = mergedData.filter(bar => bar.market_type === resolvedMarketType);
           
@@ -647,19 +570,19 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
           setQuote(quoteData);
 
           const latest = filteredData[filteredData.length - 1];
-          if (latest.analysis) {
+          if (latest?.analysis) {
             setLatestAnalysis(latest.analysis);
             // 格式化時間：HHMM -> HH:MM
-            const formattedTime = latest.time.length === 4 
-              ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}` 
+            const formattedTime = latest.time.length === 4
+              ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}`
               : latest.time;
             setLatestTime(`${latest.date} ${formattedTime}`);
           } else {
             setLatestAnalysis(null);
             setLatestTime('');
           }
-          
-          // console.log('✅ 資料已更新:', latest.time);
+
+          // console.log('✅ 資料已更新:', latest?.time);
         }
       } catch (error) {
         console.error('更新資料失敗:', error);
@@ -684,7 +607,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [hasMinuteData]);
+  }, [isInitialLoadDone]);
 
   // 監聽 WebSocket 重連，自動切回當前時段
   useEffect(() => {
@@ -695,39 +618,42 @@ function Dashboard({ onSignOut }: { onSignOut: () => Promise<void> }) {
       if (marketType !== currentSessionType) {
         setMarketType(currentSessionType);
         
-        // 更新顯示資料
+        // 更新顯示資料（該盤沒有資料時也要切換並清空，不留下另一盤的畫面）
         const filteredData = allMinuteData.filter(bar => bar.market_type === currentSessionType);
-        if (filteredData.length > 0) {
-          setMinuteData(filteredData);
-          
-          // 更新圖表資料
-          const chartPoints: MinuteChartPoint[] = filteredData.map(bar => ({
-            time: bar.time,
-            avg_price: bar.avg_price,
-            high: bar.high,
-            low: bar.low,
-            volume: bar.volume,
-            buy_volume: bar.buy_volume,
-            sell_volume: bar.sell_volume,
-            taiex: bar.analysis?.basis != null && currentSessionType === 'regular' ? bar.avg_price - bar.analysis.basis : undefined
-          }));
-          setChartData(chartPoints);
-          
-          // 更新報價和分析
-          const refPrice = currentSessionType === 'regular' ? dayReferencePrice : nightReferencePrice;
-          if (refPrice) {
-            const quoteData = generateQuoteFromMinuteData(filteredData, refPrice);
-            setQuote(quoteData);
-          }
-          
-          const latest = filteredData[filteredData.length - 1];
-          if (latest?.analysis) {
-            setLatestAnalysis(latest.analysis);
-            const formattedTime = latest.time.length === 4 
-              ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}` 
-              : latest.time;
-            setLatestTime(`${latest.date} ${formattedTime}`);
-          }
+        setMinuteData(filteredData);
+
+        // 更新圖表資料
+        const chartPoints: MinuteChartPoint[] = filteredData.map(bar => ({
+          time: bar.time,
+          avg_price: bar.avg_price,
+          high: bar.high,
+          low: bar.low,
+          volume: bar.volume,
+          buy_volume: bar.buy_volume,
+          sell_volume: bar.sell_volume,
+          taiex: bar.analysis?.basis != null && currentSessionType === 'regular' ? bar.avg_price - bar.analysis.basis : undefined
+        }));
+        setChartData(chartPoints);
+
+        // 更新報價和分析
+        const refPrice = currentSessionType === 'regular' ? dayReferencePrice : nightReferencePrice;
+        if (filteredData.length === 0) {
+          setQuote(null);
+        } else if (refPrice) {
+          const quoteData = generateQuoteFromMinuteData(filteredData, refPrice);
+          setQuote(quoteData);
+        }
+
+        const latest = filteredData[filteredData.length - 1];
+        if (latest?.analysis) {
+          setLatestAnalysis(latest.analysis);
+          const formattedTime = latest.time.length === 4
+            ? `${latest.time.slice(0, 2)}:${latest.time.slice(2)}`
+            : latest.time;
+          setLatestTime(`${latest.date} ${formattedTime}`);
+        } else if (filteredData.length === 0) {
+          setLatestAnalysis(null);
+          setLatestTime('');
         }
       }
     }

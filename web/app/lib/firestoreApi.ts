@@ -6,6 +6,7 @@ import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, setDoc,
 import type { DocumentData } from 'firebase/firestore';
 import { db } from './firebase';
 import { getLastTradingDay } from './tradingCalendar';
+import { getDaySessionDateKey, getNightSessionDateKey, toCompactDateKey } from './marketSession';
 import type { MinuteBar } from '../types/minuteData';
 import type { PttPush, PttSession } from '../types/pttChat';
 
@@ -195,36 +196,20 @@ export async function getMinuteDataAfter(
 }
 
 /**
- * 取得日盤的查詢日期 (YYYYMMDD)：08:30 前使用前一天，並排除週末與國定假日
+ * 取得日盤的查詢日期 (YYYYMMDD)：以台北時區判斷，08:30 前使用前一天，並排除週末與國定假日
  */
 export function getDaySessionDate(now: Date = new Date()): string {
-  const timeInMinutes = now.getHours() * 60 + now.getMinutes();
-
-  let dateForQuery = now;
-  if (timeInMinutes < 8 * 60 + 30) {
-    dateForQuery = new Date(now);
-    dateForQuery.setDate(dateForQuery.getDate() - 1);
-  }
-
-  return formatDateToYYYYMMDD(getLastTradingDay(dateForQuery));
+  return toCompactDateKey(getDaySessionDateKey(now));
 }
 
 /**
- * 取得夜盤的查詢日期 (YYYYMMDD)：
- * - 00:00-14:49 使用前一天的夜盤資料
- * - 14:50-23:59 使用當天的夜盤資料
+ * 取得夜盤的查詢日期 (YYYYMMDD)：以台北時區判斷
+ * - 00:00-14:50 使用前一個交易日的夜盤資料
+ * - 14:51-23:59 使用當天的夜盤資料
  * 並排除週末與國定假日
  */
 export function getNightSessionDate(now: Date = new Date()): string {
-  const timeInMinutes = now.getHours() * 60 + now.getMinutes();
-
-  let dateForQuery = now;
-  if (timeInMinutes < 14 * 60 + 50) {
-    dateForQuery = new Date(now);
-    dateForQuery.setDate(dateForQuery.getDate() - 1);
-  }
-
-  return formatDateToYYYYMMDD(getLastTradingDay(dateForQuery));
+  return toCompactDateKey(getNightSessionDateKey(now));
 }
 
 /**
@@ -240,8 +225,8 @@ export async function getTodayDaySession(symbol: string): Promise<MinuteBar[]> {
 /**
  * 取得今日夜盤資料
  * 夜盤跨日邏輯：
- * - 00:00-14:49 使用前一天的夜盤資料
- * - 14:50-23:59 使用當天的夜盤資料
+ * - 00:00-14:50 使用前一個交易日的夜盤資料
+ * - 14:51-23:59 使用當天的夜盤資料
  * @param symbol 商品代碼 (例如: MXF)
  * @returns 夜盤分鐘資料陣列
  */
@@ -251,7 +236,7 @@ export async function getTodayNightSession(symbol: string): Promise<MinuteBar[]>
 
 /**
  * 取得今日資料（日盤 + 夜盤）
- * 日盤與夜盤落在同一天集合時（14:50 之後）只讀一次再切分，避免同一集合重複讀取
+ * 日盤與夜盤落在同一天集合時（14:51 之後）只讀一次再切分，避免同一集合重複讀取
  * @param symbol 商品代碼 (例如: MXF)
  * @returns 分鐘資料陣列（日盤在前，夜盤在後）
  */

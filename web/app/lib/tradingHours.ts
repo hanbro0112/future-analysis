@@ -1,23 +1,5 @@
-import { isTradingDateKey } from './tradingCalendar';
-
-const TAIPEI_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'Asia/Taipei',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: 'numeric',
-  minute: 'numeric',
-  hourCycle: 'h23',
-});
-
-/** 取得 YYYY-MM-DD 前一天的 YYYY-MM-DD（純日期運算，不受瀏覽器時區影響） */
-const getPreviousDateKey = (dateKey: string): string => {
-  const [year, month, day] = dateKey.split('-').map(Number);
-  const previous = new Date(Date.UTC(year, month - 1, day - 1));
-  const mm = String(previous.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(previous.getUTCDate()).padStart(2, '0');
-  return `${previous.getUTCFullYear()}-${mm}-${dd}`;
-};
+import { getPreviousDateKey, isTradingDateKey } from './tradingCalendar';
+import { getTaipeiClock } from './marketSession';
 
 /**
  * 判斷指定時間是否在交易時段，恆以 Asia/Taipei 時區判斷（不受瀏覽器所在時區影響），
@@ -31,11 +13,7 @@ const getPreviousDateKey = (dateKey: string): string => {
  * @param now 要檢查的時間，預設為目前時間
  */
 export const isInTradingHours = (now: Date = new Date()): boolean => {
-  const parts = TAIPEI_TIME_FORMATTER.formatToParts(now);
-  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
-
-  const dateKey = `${part('year')}-${part('month')}-${part('day')}`;
-  const totalMinutes = Number(part('hour')) * 60 + Number(part('minute'));
+  const { dateKey, totalMinutes } = getTaipeiClock(now);
 
   const daySessionStart = 8 * 60 + 45; // 08:45
   const daySessionEnd = 13 * 60 + 45; // 13:45

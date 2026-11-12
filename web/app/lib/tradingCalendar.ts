@@ -78,6 +78,28 @@ export const isTradingDateKey = (dateKey: string): boolean => {
   return !CLOSED_DAYS.has(dateKey);
 };
 
+/** 取得 YYYY-MM-DD 前一天的 YYYY-MM-DD（純日期運算，不受瀏覽器時區影響） */
+export const getPreviousDateKey = (dateKey: string): string => {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const previous = new Date(Date.UTC(year, month - 1, day - 1));
+  const mm = String(previous.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(previous.getUTCDate()).padStart(2, '0');
+  return `${previous.getUTCFullYear()}-${mm}-${dd}`;
+};
+
+/** 以 YYYY-MM-DD 往前找最近的交易日（含當天），純日期運算，不受瀏覽器時區影響 */
+export const getLastTradingDateKey = (dateKey: string): string => {
+  let result = dateKey;
+  for (let i = 0; i < MAX_LOOKBACK_DAYS && !isTradingDateKey(result); i += 1) {
+    result = getPreviousDateKey(result);
+  }
+  return result;
+};
+
+/** 以 YYYY-MM-DD 取得「嚴格早於當天」的前一個交易日 */
+export const getPreviousTradingDateKey = (dateKey: string): string =>
+  getLastTradingDateKey(getPreviousDateKey(dateKey));
+
 /** 是否為交易日（以瀏覽器本地時區的日期判斷） */
 export const isTradingDay = (date: Date): boolean => isTradingDateKey(toDateKey(date));
 
