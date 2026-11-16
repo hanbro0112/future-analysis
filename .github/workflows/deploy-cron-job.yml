@@ -13,6 +13,7 @@ on:
           - daily-report
           - chip-report
           - ptt-chat
+          - data-cleanup
 
 # WIF 驗證需要讀取 OIDC ID Token 的權限
 permissions:
@@ -106,6 +107,25 @@ jobs:
             --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}" \
             --memory=512Mi \
             --timeout=120s \
+            --min-instances=0 \
+            --max-instances=1 \
+            --ingress-settings=internal-only
+
+      - name: 部署 data-cleanup
+        if: ${{ inputs.target == 'all' || inputs.target == 'data-cleanup' }}
+        run: |
+          gcloud functions deploy data-cleanup \
+            --gen2 \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --runtime=python314 \
+            --region="${{ env.REGION }}" \
+            --source=apps/functions \
+            --entry-point=data_cleanup \
+            --trigger-http \
+            --no-allow-unauthenticated \
+            --set-env-vars=GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}",CLEANUP_DELETE_BUDGET=15000 \
+            --memory=512Mi \
+            --timeout=540s \
             --min-instances=0 \
             --max-instances=1 \
             --ingress-settings=internal-only

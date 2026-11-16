@@ -9,8 +9,9 @@
 | `daily_report` | `daily_report.py` | 使用 Gemini API 分析台股/美股，寫入 Firestore `daily_reports/{YYYYMMDD}` | 每天 08:00（僅交易日執行，週末由程式內部判斷跳過） |
 | `chip_report` | `chip_report.py` | 抓取台指籌碼快訊 PDF，提取圖表上傳 Cloud Storage `chip-reports/{YYYYMMDD}/` | 每交易日 15:21 |
 | `crawl_ptt_chat` | `ptt_chat.py` | 抓取 PTT Stock 板盤中/盤後閒聊推文，寫入 Firestore `pttThreads`/`pttPosts` | 每分鐘（Cloud Scheduler 尚需手動建立，見下方部署說明） |
+| `data_cleanup` | `data_cleanup.py` | 刪除「台北今天 − 3 個月」之前的 Firestore 舊資料，並確保每日刪除次數不超過預算（詳見下方「資料清理」） | 每天 06:00（含週末） |
 
-三個 function 都是 HTTP-triggered，`main.py` 匯入供 `gcloud functions deploy --entry-point` 使用。
+四個 function 都是 HTTP-triggered，`main.py` 匯入供 `gcloud functions deploy --entry-point` 使用。
 
 ## 元件說明
 
@@ -22,13 +23,44 @@
 | `README_CHIP_REPORT.md` | 籌碼快訊 PDF 裁切座標調整說明 |
 | `ptt_chat.py` | 抓取 PTT Stock 板盤中/盤後閒聊推文，寫入 Firestore `pttThreads`/`pttPosts` |
 | `README_PTT_CHAT.md` | PTT 閒聊功能說明、Firestore schema、部署方式 |
+| `data_cleanup.py` | 刪除超過 3 個月的 Firestore 舊資料，以單一計數文件控管每日刪除預算 |
 
 ## 環境變數
 
 ```bash
 GCP_PROJECT_ID=demo-project
 GEMINI_API_KEY=your-gemini-api-key   # daily_report 需要
+CLEANUP_DELETE_BUDGET=15000          # data_cleanup 每個配額日最多刪除筆數（預設 15000）
 ```
+
+## 資料清理（data_cleanup）
+
+**清理範圍**（日期早於「台北今天 − 3 個月」者，當天本身保留）：
+
+| 路徑 | 說明 |
+| --- | --- |
+| `market/{code}/{YYYYMMDD}` | 分鐘 K（掃描 `market` 下所有商品，不寫死 MXF） |
+| `market/{code}/{YYYYMMDD}_tick` | 秒級明細 |
+| `daily_reports/{YYYYMMDD}` | 每日分析報告 |
+| `pttPosts/{YYYYMMDD}_{session}` | PTT 閒聊推文 |
+
+`pttThreads` 每個盤別只有一份文件，不在清理範圍。ID 格式無法解析成日期的集合 / 文件會被略過並記錄 log，不會刪除。
+
+**刪除額度控管**：Firestore 免費層每日 20,000 次刪除，太平洋時間午夜重置。
+每批（最多 500 筆）刪除前，先用 transaction 在單一文件 `_maintenance/data_cleanup`
+預扣額度（欄位 `quota_date` 為太平洋時間日期、`deleted` 為當日已預扣筆數）：
+
+- 額度用完即停止，由舊到新處理，剩下的舊資料隔天自動接續（第一次上線若有大量積壓，會分多天消化）。
+- 先預扣再刪除；批次 commit 結果不明（例如逾時）時額度不退還，寧可少刪也不超額。
+- 同一配額日內不論 Scheduler 重送或手動重複觸發，累計刪除都不會超過 `CLEANUP_DELETE_BUDGET`。
+- 計數只涵蓋這支函式；`migrate.py` 等其他刪除不會被計入，若要手動大量刪除請自行留意額度。
+- 批次刪除失敗會停止本次執行並回傳 HTTP 500。
+
+**手動觸發**（需具備 invoker 權限）：加上 `?dry_run=true` 只統計不刪除、不寫入計數。回傳 JSON 包含
+`cutoff`、`deleted`、`budget_exhausted`、`skipped_ids`、`error`。
+
+排程時間選在台北 06:00（夜盤 05:00 收盤後、日盤開盤前），此時間換算為前一天太平洋時間
+14:00 / 15:00，每天一次剛好落在不同的配額日。`--max-retry-attempts=0` 避免失敗時重打。
 
 ## 本地測試
 
@@ -48,17 +80,21 @@ uv run python test_chip_report.py
 uv run pytest test_ptt_chat.py
 uv run python test_ptt_chat_manual.py
 
+# 資料清理：pytest 單元測試
+uv run pytest test_data_cleanup.py
+
 # 用 functions-framework 本地啟動 HTTP server 測試
 uv run functions-framework --target=daily_report --debug
 uv run functions-framework --target=chip_report --debug
 uv run functions-framework --target=crawl_ptt_chat --debug
+uv run functions-framework --target=data_cleanup --debug
 ```
 
 ## 部署（GitHub Action，推薦）
 
 [.github/workflows/deploy-cron-job.yml](../../.github/workflows/deploy-cron-job.yml)
 在 GitHub Actions 頁面手動觸發（`workflow_dispatch`），可選擇部署
-`all` / `daily-report` / `chip-report` / `ptt-chat`。流程：
+`all` / `daily-report` / `chip-report` / `ptt-chat` / `data-cleanup`。流程：
 
 1. 用 `uv export` 產生 `apps/functions` 專用的 `requirements.txt`（排除
    workspace 內的本地套件 `firestore-writer`）
@@ -125,6 +161,18 @@ gcloud functions deploy ptt-chat \
   --trigger-http \
   --no-allow-unauthenticated \
   --set-env-vars=GCP_PROJECT_ID=your-project-id
+
+gcloud functions deploy data-cleanup \
+  --gen2 \
+  --runtime=python314 \
+  --region=asia-east1 \
+  --source=. \
+  --entry-point=data_cleanup \
+  --trigger-http \
+  --no-allow-unauthenticated \
+  --set-env-vars=GCP_PROJECT_ID=your-project-id,CLEANUP_DELETE_BUDGET=15000 \
+  --timeout=540s \
+  --max-instances=1
 ```
 
 ### 2. 建立服務帳戶供 Cloud Scheduler 呼叫
@@ -144,6 +192,10 @@ gcloud functions add-invoker-policy-binding chip-report \
 gcloud functions add-invoker-policy-binding ptt-chat \
   --region=asia-east1 \
   --member="serviceAccount:scheduler-invoker@your-project-id.iam.gserviceaccount.com"
+
+gcloud functions add-invoker-policy-binding data-cleanup \
+  --region=asia-east1 \
+  --member="serviceAccount:scheduler-invoker@your-project-id.iam.gserviceaccount.com"
 ```
 
 ### 3. 建立 Cloud Scheduler 排程（OIDC 觸發）
@@ -152,6 +204,7 @@ gcloud functions add-invoker-policy-binding ptt-chat \
 DAILY_REPORT_URL=$(gcloud functions describe daily-report --gen2 --region=asia-east1 --format='value(serviceConfig.uri)')
 CHIP_REPORT_URL=$(gcloud functions describe chip-report --gen2 --region=asia-east1 --format='value(serviceConfig.uri)')
 PTT_CHAT_URL=$(gcloud functions describe ptt-chat --gen2 --region=asia-east1 --format='value(serviceConfig.uri)')
+DATA_CLEANUP_URL=$(gcloud functions describe data-cleanup --gen2 --region=asia-east1 --format='value(serviceConfig.uri)')
 
 gcloud scheduler jobs create http daily-report-job \
   --location=asia-east1 \
@@ -182,6 +235,17 @@ gcloud scheduler jobs create http ptt-chat-job \
   --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com" \
   --max-retry-attempts=1 \
   --min-backoff=30s
+
+# 每天一次（含週末，讓積壓的舊資料能持續分天消化）；不重試、attempt-deadline 與函式 timeout 同為 540s
+gcloud scheduler jobs create http data-cleanup-job \
+  --location=asia-east1 \
+  --schedule="0 6 * * *" \
+  --time-zone="Asia/Taipei" \
+  --uri="$DATA_CLEANUP_URL" \
+  --http-method=POST \
+  --oidc-service-account-email="scheduler-invoker@your-project-id.iam.gserviceaccount.com" \
+  --attempt-deadline=540s \
+  --max-retry-attempts=0
 ```
 
 `ptt-chat-job` 沒有用 `1-5` 排除週末——PTT 板面本身沒有交易日限制，`ptt_chat.py`
