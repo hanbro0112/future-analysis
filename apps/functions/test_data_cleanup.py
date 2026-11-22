@@ -244,10 +244,10 @@ def test_deletes_oldest_first() -> None:
 
 
 def test_batches_never_exceed_limit() -> None:
-    db = FakeDb(market={"MXF": {"20260101": 1200}})
+    db = FakeDb(market={"MXF": {"20260101": 250}})
     result = _run(db, InMemoryLedger(15_000))
-    assert result.deleted == 1200
-    assert db.batch_sizes == [BATCH_SIZE, BATCH_SIZE, 200]
+    assert result.deleted == 250
+    assert db.batch_sizes == [BATCH_SIZE, BATCH_SIZE, 50]
 
 
 def test_budget_truncates_exactly() -> None:
@@ -257,7 +257,7 @@ def test_budget_truncates_exactly() -> None:
 
     assert result.deleted == 700
     assert len(db.deleted_paths) == 700
-    assert db.batch_sizes == [500, 200]
+    assert db.batch_sizes == [BATCH_SIZE] * 7
     assert result.budget_exhausted is True
     assert ledger.used == 700
 
@@ -355,7 +355,7 @@ def _patch_entry(monkeypatch: pytest.MonkeyPatch, budget: int = 15_000) -> None:
     monkeypatch.setenv("CLEANUP_DELETE_BUDGET", str(budget))
 
 
-def test_entry_point_success(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_entry_point_success(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     _patch_entry(monkeypatch)
     body, status = data_cleanup.data_cleanup(FakeRequest())  # type: ignore[arg-type]
 
@@ -363,6 +363,7 @@ def test_entry_point_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["deleted"] == 3
     assert body["cutoff"] == "2026-08-14"
     assert FakeWriter.last.closed is True
+    assert "已使用額度 3" in capsys.readouterr().out
 
 
 def test_entry_point_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:

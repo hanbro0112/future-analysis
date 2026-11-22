@@ -28,7 +28,7 @@ from firestore_writer import FirestoreWriter
 from timezone_utils import now_taipei
 
 RETENTION_MONTHS = 3
-BATCH_SIZE = 500  # Firestore 單一 batch 上限
+BATCH_SIZE = 100  # 每批刪除筆數；500 筆的批次刪除 _tick 文件時曾超過 Firestore 單一 batch 大小上限
 DEFAULT_DELETE_BUDGET = 15_000
 BUDGET_ENV_NAME = "CLEANUP_DELETE_BUDGET"
 
@@ -360,6 +360,15 @@ def run_cleanup(
 
 # ========== Cloud Functions 入口 ==========
 
+def _quota_used(ledger: QuotaLedger, budget: int) -> Optional[int]:
+    """本配額日已使用（預扣）的刪除額度；讀取失敗時回傳 None，不影響清理結果"""
+    try:
+        return budget - ledger.remaining()
+    except Exception as e:
+        print(f"⚠️  讀取已使用額度失敗: {type(e).__name__}: {e}")
+        return None
+
+
 def _is_truthy(value: Optional[str]) -> bool:
     return value is not None and value.strip().lower() in ("1", "true", "yes")
 
@@ -376,13 +385,14 @@ def data_cleanup(request: Request) -> tuple[dict[str, object], int]:
         try:
             ledger = FirestoreQuotaLedger(firestore_writer.db, budget)
             result = run_cleanup(firestore_writer.db, ledger, cutoff, budget, dry_run)
+            quota_used = _quota_used(ledger, budget)
         finally:
             firestore_writer.close()
 
         status = 500 if result.error else 200
         print(
-            f"🧹 清理完成: 刪除 {result.deleted} 筆（預算 {budget}，cutoff {result.cutoff}，"
-            f"額度用完={result.budget_exhausted}，dry_run={dry_run}）"
+            f"🧹 清理完成: 刪除 {result.deleted} 筆（預算 {budget}，已使用額度 {quota_used}，"
+            f"cutoff {result.cutoff}，額度用完={result.budget_exhausted}，dry_run={dry_run}）"
         )
         return asdict(result), status
 

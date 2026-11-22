@@ -47,7 +47,7 @@ CLEANUP_DELETE_BUDGET=15000          # data_cleanup 每個配額日最多刪除�
 `pttThreads` 每個盤別只有一份文件，不在清理範圍。ID 格式無法解析成日期的集合 / 文件會被略過並記錄 log，不會刪除。
 
 **刪除額度控管**：Firestore 免費層每日 20,000 次刪除，太平洋時間午夜重置。
-每批（最多 500 筆）刪除前，先用 transaction 在單一文件 `_maintenance/data_cleanup`
+每批（最多 100 筆）刪除前，先用 transaction 在單一文件 `_maintenance/data_cleanup`
 預扣額度（欄位 `quota_date` 為太平洋時間日期、`deleted` 為當日已預扣筆數）：
 
 - 額度用完即停止，由舊到新處理，剩下的舊資料隔天自動接續（第一次上線若有大量積壓，會分多天消化）。
