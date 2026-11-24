@@ -120,7 +120,7 @@ def test_is_tick_stale_false_right_after_open() -> None:
 
 
 def test_is_tick_stale_true_once_open_longer_than_threshold() -> None:
-    assert price_listener.is_tick_stale(datetime(2026, 7, 27, 8, 48), 999) is True
+    assert price_listener.is_tick_stale(datetime(2026, 7, 27, 8, 49), 999) is True
 
 
 def test_is_tick_stale_false_between_day_and_night_session() -> None:
@@ -350,12 +350,16 @@ def test_run_health_checks_rebuilds_publisher_when_nothing_published(
     assert "心跳" in capsys.readouterr().out
 
 
-def test_run_health_checks_does_not_rebuild_when_publishing_normally(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_health_checks_does_not_rebuild_when_publishing_normally(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     price_listener.pubsub_publisher = _FakePublisher({"published": 120, "failed": 0, "dropped": 0})  # type: ignore[assignment]
     monkeypatch.setattr(price_listener, "rebuild_publisher", lambda: pytest.fail("正常發布不該重建"))
     monkeypatch.setattr(price_listener, "check_and_reconnect", lambda: None)
 
     price_listener.run_health_checks()
+
+    assert "心跳" not in capsys.readouterr().out  # 正常時不印 log
 
 
 def test_run_health_checks_still_checks_connection_when_heartbeat_fails(monkeypatch: pytest.MonkeyPatch) -> None:

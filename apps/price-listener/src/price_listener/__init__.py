@@ -22,7 +22,7 @@ TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 ACTIVE_WINDOW = ActiveWindow(warmup=timedelta(minutes=5), grace=timedelta(minutes=1))
 
 # 正式交易時段內超過這麼久沒收到 tick，視為連線停滯（連線與訂閱旗標都正常、但資料不來）
-TICK_STALE_SECONDS = 120.0
+TICK_STALE_SECONDS = 180.0
 
 # logout 可能卡住，超過這個秒數就放棄等待，避免時段迴圈被拖住
 LOGOUT_TIMEOUT_SECONDS = 10.0
@@ -532,11 +532,13 @@ def rebuild_publisher() -> bool:
 
 
 def run_health_checks() -> None:
-    """每分鐘執行：印心跳、發布層自癒、檢查連線與訂閱狀態（含 tick 看門狗）"""
+    """每分鐘執行：發布異常時印心跳、發布層自癒、檢查連線與訂閱狀態（含 tick 看門狗）"""
     try:
         delta = take_publish_stats_delta()
         if delta is not None:
-            print(format_heartbeat(delta, time.monotonic() - last_tick_time))
+            # 只在有發布失敗或丟棄時才印 log，正常運作時保持安靜
+            if delta["failed"] + delta["dropped"] > 0:
+                print(format_heartbeat(delta, time.monotonic() - last_tick_time))
             if should_rebuild_publisher(delta):
                 print("🔴 近 1 分鐘沒有任何發布成功、卻有失敗或丟棄，重建 Pub/Sub Publisher...")
                 rebuild_publisher()
