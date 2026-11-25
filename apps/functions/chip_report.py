@@ -6,7 +6,7 @@
 import os
 import io
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Tuple
 import requests
 import fitz  # PyMuPDF
@@ -19,6 +19,31 @@ from timezone_utils import now_taipei
 
 # 禁用 SSL 警告（因為目標網站 SSL 證書有問題）
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# 報告換日時間（台北時間，小時）。
+# 永豐網站的籌碼快訊約於下午 3:20 更新當日報告，因此在下午 3 點之前
+# 目標日期仍視為前一天；下午 3 點後才換日。
+# 這樣過了午夜 00:00 重新觸發 Cloud Scheduler，仍會抓取前一個報告日的檔案。
+REPORT_ROLLOVER_HOUR = 15
+
+
+def resolve_report_date(now: datetime) -> datetime:
+    """
+    依台北時間決定要抓取的報告日期
+
+    永豐網站的籌碼快訊於下午 3:20 更新，故下午 3 點後才換日：
+    - 15:00 以前 → 前一天
+    - 15:00（含）以後 → 當天
+
+    Args:
+        now: 目前台北時間（naive datetime）
+
+    Returns:
+        目標報告日期
+    """
+    if now.hour < REPORT_ROLLOVER_HOUR:
+        return now - timedelta(days=1)
+    return now
 
 
 class ChipReportProcessor:
@@ -267,13 +292,13 @@ class ChipReportProcessor:
         處理每日籌碼報告（主流程）
 
         Args:
-            target_date: 目標日期，預設為今天
+            target_date: 目標日期，預設依 resolve_report_date 決定（下午 3 點後才換日）
 
         Returns:
             處理是否成功
         """
         if target_date is None:
-            target_date = now_taipei()
+            target_date = resolve_report_date(now_taipei())
 
         print(f"\n{'='*60}")
         print(f"📊 開始處理籌碼快訊 - {target_date.strftime('%Y-%m-%d')}")
@@ -335,8 +360,11 @@ def chip_report(request):
     print(f"📊 開始處理籌碼快訊 - {now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
 
+    target_date = resolve_report_date(now)
+    print(f"🎯 目標報告日期: {target_date.strftime('%Y-%m-%d')}")
+
     try:
-        success = process_chip_report(now)
+        success = process_chip_report(target_date)
     except Exception as e:
         import traceback
         print(f"❌ 處理籌碼快訊時發生錯誤: {e}")
