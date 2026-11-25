@@ -7,10 +7,11 @@ Firestore 舊資料清理
 - market/{code}/{YYYYMMDD}_tick   秒級明細
 - daily_reports/{YYYYMMDD}        每日分析報告
 - pttPosts/{YYYYMMDD}_{session}   PTT 閒聊推文
+- Storage chip-reports/{YYYYMMDD}/*  籌碼報告圖片
 
 Firestore 免費層每日 20,000 次刪除（太平洋時間午夜重置）。為確保不超額，
 每批刪除前會先在單一計數文件 `_maintenance/data_cleanup` 以 transaction 預扣額度，
-額度用完即停止，未處理的舊資料隔天自動接續。
+額度用完即停止，未處理的舊資料隔天自動接續。Storage 刪除不受此額度限制。
 """
 import calendar
 import os
@@ -21,8 +22,10 @@ from typing import Callable, Iterable, Optional, Protocol
 from zoneinfo import ZoneInfo
 
 from flask import Request
-from google.cloud import firestore
+from google.api_core.exceptions import NotFound
+from google.cloud import firestore, storage
 from google.cloud.firestore import Client, DocumentReference
+from google.cloud.storage import Blob, Bucket
 
 from firestore_writer import FirestoreWriter
 from timezone_utils import now_taipei
@@ -42,6 +45,10 @@ DAILY_REPORTS_COLLECTION = "daily_reports"
 DAILY_REPORT_ID_RE = re.compile(r"^(\d{8})$")
 PTT_POSTS_COLLECTION = "pttPosts"
 PTT_POST_ID_RE = re.compile(r"^(\d{8})_[A-Za-z]+$")
+
+STORAGE_BUCKET_ENV_NAME = "STORAGE_BUCKET_NAME"
+STORAGE_PREFIX = "chip-reports/"
+STORAGE_BLOB_RE = re.compile(r"^chip-reports/(\d{8})/[^/]+$")
 
 
 # ========== 日期工具 ==========
@@ -358,6 +365,66 @@ def run_cleanup(
     return result
 
 
+# ========== Cloud Storage 清理 ==========
+
+@dataclass
+class StorageCleanupResult:
+    deleted: int = 0
+    skipped: int = 0
+    failed: int = 0
+    error: Optional[str] = None
+
+
+def storage_bucket_name(project_id: str) -> str:
+    """Storage bucket 名稱：可由環境變數覆寫，預設與 chip_report 相同"""
+    return os.getenv(STORAGE_BUCKET_ENV_NAME) or f"{project_id}.firebasestorage.app"
+
+
+def _create_bucket(project_id: str) -> Bucket:
+    return storage.Client(project=project_id).bucket(storage_bucket_name(project_id))
+
+
+def run_storage_cleanup(bucket: Bucket, cutoff: date, dry_run: bool = False) -> StorageCleanupResult:
+    """
+    刪除 chip-reports/{YYYYMMDD}/ 底下早於 cutoff 的圖片
+
+    Storage 刪除不受 Firestore 每日刪除額度限制，因此不使用 ledger。
+    單一檔案刪除失敗不會中斷其餘檔案，失敗筆數記錄於 failed。
+    """
+    result = StorageCleanupResult()
+
+    try:
+        expired: list[Blob] = []
+        for blob in bucket.list_blobs(prefix=STORAGE_PREFIX):
+            matched = STORAGE_BLOB_RE.match(blob.name)
+            day = extract_date(matched.group(1), DAILY_REPORT_ID_RE) if matched else None
+            if day is None:
+                result.skipped += 1
+                print(f"⚠️  略過無法解析日期的檔案: {blob.name}")
+                continue
+            if day < cutoff:
+                expired.append(blob)
+    except Exception as e:
+        result.error = f"列出 Storage 檔案失敗: {type(e).__name__}: {e}"
+        print(f"❌ {result.error}")
+        return result
+
+    for blob in expired:
+        if dry_run:
+            result.deleted += 1
+            continue
+        try:
+            blob.delete()
+            result.deleted += 1
+        except NotFound:
+            continue  # 已被刪除，視為成功
+        except Exception as e:
+            result.failed += 1
+            result.error = f"刪除 Storage 檔案失敗（共 {result.failed} 筆失敗，最近一筆 {blob.name}）: {type(e).__name__}: {e}"
+            print(f"❌ {result.error}")
+    return result
+
+
 # ========== Cloud Functions 入口 ==========
 
 def _quota_used(ledger: QuotaLedger, budget: int) -> Optional[int]:
@@ -381,7 +448,8 @@ def data_cleanup(request: Request) -> tuple[dict[str, object], int]:
         budget = parse_budget(os.getenv(BUDGET_ENV_NAME))
         cutoff = compute_cutoff(now_taipei())
 
-        firestore_writer = FirestoreWriter(project_id=os.getenv("GCP_PROJECT_ID", "demo-project"))
+        project_id = os.getenv("GCP_PROJECT_ID", "demo-project")
+        firestore_writer = FirestoreWriter(project_id=project_id)
         try:
             ledger = FirestoreQuotaLedger(firestore_writer.db, budget)
             result = run_cleanup(firestore_writer.db, ledger, cutoff, budget, dry_run)
@@ -389,12 +457,20 @@ def data_cleanup(request: Request) -> tuple[dict[str, object], int]:
         finally:
             firestore_writer.close()
 
-        status = 500 if result.error else 200
+        # Storage 清理獨立於 Firestore 額度，即使 Firestore 額度用完也照常執行
+        try:
+            storage_result = run_storage_cleanup(_create_bucket(project_id), cutoff, dry_run)
+        except Exception as e:
+            storage_result = StorageCleanupResult(error=f"Storage 清理失敗: {type(e).__name__}: {e}")
+            print(f"❌ {storage_result.error}")
+
+        status = 500 if result.error or storage_result.error else 200
         print(
-            f"🧹 清理完成: 刪除 {result.deleted} 筆（預算 {budget}，已使用額度 {quota_used}，"
-            f"cutoff {result.cutoff}，額度用完={result.budget_exhausted}，dry_run={dry_run}）"
+            f"🧹 清理完成: Firestore 刪除 {result.deleted} 筆（預算 {budget}，已使用額度 {quota_used}，"
+            f"cutoff {result.cutoff}，額度用完={result.budget_exhausted}，dry_run={dry_run}）；"
+            f"Storage 刪除 {storage_result.deleted} 筆，失敗 {storage_result.failed} 筆"
         )
-        return asdict(result), status
+        return {**asdict(result), "storage": asdict(storage_result)}, status
 
     except Exception as e:
         print(f"❌ 資料清理發生錯誤: {type(e).__name__}: {e}")

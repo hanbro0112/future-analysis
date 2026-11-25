@@ -31,6 +31,7 @@
 GCP_PROJECT_ID=demo-project
 GEMINI_API_KEY=your-gemini-api-key   # daily_report 需要
 CLEANUP_DELETE_BUDGET=15000          # data_cleanup 每個配額日最多刪除筆數（預設 15000）
+STORAGE_BUCKET_NAME=                 # data_cleanup 要清理的 Storage bucket（預設 {GCP_PROJECT_ID}.firebasestorage.app）
 ```
 
 ## 資料清理（data_cleanup）
@@ -43,6 +44,9 @@ CLEANUP_DELETE_BUDGET=15000          # data_cleanup 每個配額日最多刪除�
 | `market/{code}/{YYYYMMDD}_tick` | 秒級明細 |
 | `daily_reports/{YYYYMMDD}` | 每日分析報告 |
 | `pttPosts/{YYYYMMDD}_{session}` | PTT 閒聊推文 |
+| Storage `chip-reports/{YYYYMMDD}/*` | 籌碼報告圖片（bucket 預設 `{GCP_PROJECT_ID}.firebasestorage.app`，可用 `STORAGE_BUCKET_NAME` 覆寫） |
+
+Storage 清理獨立於下方的 Firestore 刪除額度，額度用完時仍會執行；執行服務帳戶需具備 `storage.objects.list` 與 `storage.objects.delete`（例如對該 bucket 授予 `roles/storage.objectAdmin`）。Storage 清理失敗同樣回傳 HTTP 500，回應 JSON 的 `storage` 欄位含 `deleted` / `skipped` / `failed` / `error`。
 
 `pttThreads` 每個盤別只有一份文件，不在清理範圍。ID 格式無法解析成日期的集合 / 文件會被略過並記錄 log，不會刪除。
 

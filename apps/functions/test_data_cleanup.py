@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
+from google.api_core.exceptions import NotFound
 from google.cloud import firestore
 
 import data_cleanup
@@ -23,6 +24,8 @@ from data_cleanup import (
     parse_budget,
     quota_date_pacific,
     run_cleanup,
+    run_storage_cleanup,
+    storage_bucket_name,
     subtract_months,
 )
 
@@ -329,6 +332,103 @@ def test_nothing_expired() -> None:
     assert result.budget_exhausted is False
 
 
+# ========== Storage 清理 ==========
+
+class FakeBlob:
+    def __init__(self, name: str, error: Optional[Exception] = None) -> None:
+        self.name = name
+        self._error = error
+        self.deleted = False
+
+    def delete(self) -> None:
+        if self._error is not None:
+            raise self._error
+        self.deleted = True
+
+
+class FakeBucket:
+    def __init__(self, names: list[str], list_error: Optional[Exception] = None) -> None:
+        self.blobs = [FakeBlob(name) for name in names]
+        self._list_error = list_error
+        self.prefix: Optional[str] = None
+
+    def list_blobs(self, prefix: str) -> list[FakeBlob]:
+        self.prefix = prefix
+        if self._list_error is not None:
+            raise self._list_error
+        return self.blobs
+
+
+def _deleted_names(bucket: FakeBucket) -> list[str]:
+    return [blob.name for blob in bucket.blobs if blob.deleted]
+
+
+def test_storage_deletes_only_expired_chip_reports() -> None:
+    bucket = FakeBucket([
+        "chip-reports/20260101/20260101_MTX_futures_ratio.png",
+        "chip-reports/20260813/20260813_TMF_futures_ratio.png",
+        "chip-reports/20260814/20260814_MTX_futures_ratio.png",  # cutoff 當天保留
+        "chip-reports/20261110/20261110_MTX_futures_ratio.png",
+        "chip-reports/junk/a.png",
+        "chip-reports/20261301/a.png",  # 不合法日期
+        "chip-reports/20260101/sub/a.png",  # 多層路徑
+    ])
+
+    result = run_storage_cleanup(bucket, CUTOFF)  # type: ignore[arg-type]
+
+    assert bucket.prefix == "chip-reports/"
+    assert result.error is None
+    assert result.deleted == 2
+    assert result.skipped == 3
+    assert _deleted_names(bucket) == [
+        "chip-reports/20260101/20260101_MTX_futures_ratio.png",
+        "chip-reports/20260813/20260813_TMF_futures_ratio.png",
+    ]
+
+
+def test_storage_dry_run_does_not_delete() -> None:
+    bucket = FakeBucket(["chip-reports/20260101/a.png", "chip-reports/20260102/b.png"])
+    result = run_storage_cleanup(bucket, CUTOFF, dry_run=True)  # type: ignore[arg-type]
+    assert result.deleted == 2
+    assert _deleted_names(bucket) == []
+
+
+def test_storage_single_failure_does_not_stop_others() -> None:
+    bucket = FakeBucket(["chip-reports/20260101/a.png", "chip-reports/20260102/b.png", "chip-reports/20260103/c.png"])
+    bucket.blobs[1] = FakeBlob(bucket.blobs[1].name, error=RuntimeError("boom"))
+
+    result = run_storage_cleanup(bucket, CUTOFF)  # type: ignore[arg-type]
+
+    assert result.deleted == 2
+    assert result.failed == 1
+    assert result.error is not None and "chip-reports/20260102/b.png" in result.error
+
+
+def test_storage_not_found_counts_as_already_deleted() -> None:
+    bucket = FakeBucket(["chip-reports/20260101/a.png"])
+    bucket.blobs[0] = FakeBlob(bucket.blobs[0].name, error=NotFound("gone"))
+
+    result = run_storage_cleanup(bucket, CUTOFF)  # type: ignore[arg-type]
+
+    assert result.deleted == 0
+    assert result.failed == 0
+    assert result.error is None
+
+
+def test_storage_list_failure_returns_error() -> None:
+    bucket = FakeBucket([], list_error=RuntimeError("403 permission denied"))
+    result = run_storage_cleanup(bucket, CUTOFF)  # type: ignore[arg-type]
+    assert result.deleted == 0
+    assert result.error is not None and "列出 Storage 檔案失敗" in result.error
+
+
+def test_storage_bucket_name_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("STORAGE_BUCKET_NAME", raising=False)
+    assert storage_bucket_name("my-proj") == "my-proj.firebasestorage.app"
+    monkeypatch.setenv("STORAGE_BUCKET_NAME", "custom-bucket")
+    assert storage_bucket_name("my-proj") == "custom-bucket"
+
+
 # ========== HTTP 入口 ==========
 
 class FakeRequest:
@@ -350,6 +450,7 @@ class FakeWriter:
 
 def _patch_entry(monkeypatch: pytest.MonkeyPatch, budget: int = 15_000) -> None:
     monkeypatch.setattr(data_cleanup, "FirestoreWriter", FakeWriter)
+    monkeypatch.setattr(data_cleanup, "_create_bucket", lambda project_id: FakeBucket([]))
     monkeypatch.setattr(data_cleanup, "FirestoreQuotaLedger", lambda db, b: InMemoryLedger(b))
     monkeypatch.setattr(data_cleanup, "now_taipei", lambda: datetime(2026, 11, 14, 6, 0))
     monkeypatch.setenv("CLEANUP_DELETE_BUDGET", str(budget))
@@ -382,6 +483,46 @@ def test_entry_point_invalid_budget_returns_500(monkeypatch: pytest.MonkeyPatch)
 
     assert status == 500
     assert "error" in body
+
+
+def test_entry_point_includes_storage_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_entry(monkeypatch)
+    bucket = FakeBucket(["chip-reports/20200101/a.png", "chip-reports/20261110/b.png"])
+    monkeypatch.setattr(data_cleanup, "_create_bucket", lambda project_id: bucket)
+
+    body, status = data_cleanup.data_cleanup(FakeRequest())  # type: ignore[arg-type]
+
+    assert status == 200
+    assert body["storage"]["deleted"] == 1
+    assert _deleted_names(bucket) == ["chip-reports/20200101/a.png"]
+
+
+def test_entry_point_storage_runs_even_when_firestore_budget_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_entry(monkeypatch)
+    monkeypatch.setattr(data_cleanup, "FirestoreQuotaLedger", lambda db, b: InMemoryLedger(b, used=b))
+    bucket = FakeBucket(["chip-reports/20200101/a.png"])
+    monkeypatch.setattr(data_cleanup, "_create_bucket", lambda project_id: bucket)
+
+    body, status = data_cleanup.data_cleanup(FakeRequest())  # type: ignore[arg-type]
+
+    assert status == 200
+    assert body["deleted"] == 0
+    assert body["storage"]["deleted"] == 1
+
+
+def test_entry_point_storage_failure_returns_500_but_firestore_still_cleaned(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_entry(monkeypatch)
+
+    def raise_error(project_id: str) -> FakeBucket:
+        raise RuntimeError("無法建立 Storage client")
+
+    monkeypatch.setattr(data_cleanup, "_create_bucket", raise_error)
+
+    body, status = data_cleanup.data_cleanup(FakeRequest())  # type: ignore[arg-type]
+
+    assert status == 500
+    assert body["deleted"] == 3  # Firestore 不受影響
+    assert "Storage 清理失敗" in body["storage"]["error"]
 
 
 def test_entry_point_returns_500_on_batch_failure(monkeypatch: pytest.MonkeyPatch) -> None:
