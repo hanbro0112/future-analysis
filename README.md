@@ -344,7 +344,8 @@ users (Collection)
 | --- | --- | --- | --- |
 | `market/{代碼}/{日期}` 與 `{日期}_tick` | `price-analyzer` | `web` | 需登入，且日期落在最近 5 天內（含當天） |
 | `daily_reports/{日期}` | `daily-report` | `web` | 需登入，且日期落在最近 5 天內 |
-| `pttThreads/{session}`、`pttPosts/{日期}_{session}` | `ptt-chat` | `web` | 需登入 |
+| `pttPosts/{日期}_{session}`（含分片 `_p{n}`） | `ptt-chat` | `web` | 需登入，且日期落在最近 5 天內 |
+| `pttThreads/{session}` | `ptt-chat` | 僅後端 | 前端不可讀 |
 | `users/{uid}/setting/pttReadState` | `web`（使用者本人） | `web` | 僅本人可讀寫 |
 
 後端服務使用 service account（Admin SDK），不受安全規則限制；前端 `web` 只能依上表規則讀取。

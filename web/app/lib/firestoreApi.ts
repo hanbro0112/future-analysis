@@ -2,7 +2,7 @@
  * Firestore 資料存取層
  * 讀取分鐘級期貨資料與每日分析
  */
-import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, setDoc, onSnapshot, documentId, Unsubscribe } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import type { DocumentData } from 'firebase/firestore';
 import { db } from './firebase';
 import { getLastTradingDay } from './tradingCalendar';
@@ -447,8 +447,22 @@ export async function getTodayDailyReport(): Promise<DailyReport | null> {
   return getDailyReport(dateStr);
 }
 
+/** 單一分片寫滿的推文數，必須與後端 apps/functions/ptt_chat.py 的 MAX_POSTS_PER_PART 一致 */
+export const PTT_MAX_POSTS_PER_PART = 5000;
+
+/** PTT 分片文件 ID：第 1 片為 `{date}_{session}`，之後為 `{date}_{session}_p{n}` */
+function getPttPartDocId(baseDocId: string, part: number): string {
+  return part <= 1 ? baseDocId : `${baseDocId}_p${part}`;
+}
+
 /**
  * 監聽指定日期與盤別的 PTT Stock 板閒聊訊息
+ *
+ * 單一文件有 1 MiB 上限，後端會把推文分成多片（見 getPttPartDocId），且一定寫滿
+ * PTT_MAX_POSTS_PER_PART 才會換下一片。這裡逐片以單一文件訂閱（不用集合查詢，security rules 只需
+ * 評估 get），某一片寫滿就接著訂閱下一片；已寫滿的分片不再變動，每分鐘只會推送最新那一片。
+ * 所有已訂閱分片的第一次快照都到齊後才回呼，避免只有前幾片時讓已讀位置還原誤判。
+ *
  * @param session 'intraday' (盤中閒聊) | 'afterhours' (盤後閒聊)
  * @param date 日期 (格式: YYYYMMDD)
  * @param callback 訊息更新回調函數
@@ -459,38 +473,45 @@ export function subscribeToPttPosts(
   date: string,
   callback: (posts: PttPush[]) => void
 ): Unsubscribe {
-  // 單一文件有 1 MiB 上限，後端會把推文分成 {date}_{session}（第 1 片）、{date}_{session}_p2、_p3...
-  // 這裡用文件 ID 前綴範圍查詢一次訂閱所有分片，之後只有內容變動的分片會被推送
   const baseDocId = `${date}_${session}`;
-  const partsQuery = query(
-    collection(db, 'pttPosts'),
-    where(documentId(), '>=', baseDocId),
-    where(documentId(), '<=', `${baseDocId}`)
-  );
+  const unsubscribers = new Map<number, Unsubscribe>();
+  const partPosts = new Map<number, PttPush[]>();
+  let isClosed = false;
 
-  return onSnapshot(partsQuery, (snapshot) => {
-    const parts: { part: number; posts: PttPush[] }[] = [];
-    snapshot.docs.forEach((docSnap) => {
-      const part = getPttPartNumber(docSnap.id, baseDocId);
-      if (part === null) return;
-      parts.push({ part, posts: (docSnap.data().posts as PttPush[] | undefined) || [] });
-    });
-    parts.sort((a, b) => a.part - b.part);
+  const emit = () => {
+    if (isClosed || partPosts.size < unsubscribers.size) return;
 
-    callback(parts.flatMap(({ posts }) => posts));
-  }, (error) => {
-    console.error(`❌ 監聽 PTT 閒聊訊息失敗 (pttPosts/${baseDocId}*):`, error);
-  });
-}
+    const merged: PttPush[] = [];
+    for (let part = 1; partPosts.has(part); part += 1) {
+      merged.push(...(partPosts.get(part) as PttPush[]));
+    }
+    callback(merged);
+  };
 
-/**
- * 解析 PTT 分片文件 ID 的分片序號：`{base}` 為第 1 片，`{base}_p{n}` 為第 n 片，
- * 其他同前綴但格式不符的文件回傳 null（會被忽略）
- */
-function getPttPartNumber(docId: string, baseDocId: string): number | null {
-  if (docId === baseDocId) return 1;
-  const match = docId.slice(baseDocId.length).match(/^_p(\d+)$/);
-  return docId.startsWith(baseDocId) && match ? Number(match[1]) : null;
+  const listenToPart = (part: number) => {
+    if (unsubscribers.has(part)) return;
+
+    const docId = getPttPartDocId(baseDocId, part);
+    unsubscribers.set(part, onSnapshot(doc(db, 'pttPosts', docId), (docSnap) => {
+      const posts = (docSnap.data()?.posts as PttPush[] | undefined) || [];
+      partPosts.set(part, posts);
+
+      if (posts.length >= PTT_MAX_POSTS_PER_PART) {
+        listenToPart(part + 1);
+      }
+      emit();
+    }, (error) => {
+      console.error(`❌ 監聽 PTT 閒聊訊息失敗 (pttPosts/${docId}):`, error);
+    }));
+  };
+
+  listenToPart(1);
+
+  return () => {
+    isClosed = true;
+    unsubscribers.forEach((unsubscribe) => unsubscribe());
+    unsubscribers.clear();
+  };
 }
 
 /**

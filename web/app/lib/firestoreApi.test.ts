@@ -1,5 +1,6 @@
 import {
   subscribeToPttPosts,
+  PTT_MAX_POSTS_PER_PART,
   getPttReadState,
   savePttReadState,
   getPttWindowSize,
@@ -8,18 +9,14 @@ import {
 import type { PttPush } from '../types/pttChat';
 
 const mockDoc = jest.fn((..._args: unknown[]) => 'fake-doc-ref');
-const mockCollection = jest.fn((..._args: unknown[]) => 'fake-collection');
-const mockQuery = jest.fn((..._args: unknown[]) => 'fake-query');
-const mockWhere = jest.fn((..._args: unknown[]) => 'fake-where');
 const mockOnSnapshot = jest.fn();
 const mockGetDoc = jest.fn();
 const mockSetDoc = jest.fn();
 
 jest.mock('firebase/firestore', () => ({
-  collection: (...args: unknown[]) => mockCollection(...args),
-  query: (...args: unknown[]) => mockQuery(...args),
-  where: (...args: unknown[]) => mockWhere(...args),
-  documentId: () => 'DOC_ID_FIELD',
+  collection: jest.fn(),
+  query: jest.fn(),
+  where: jest.fn(),
   orderBy: jest.fn(),
   limit: jest.fn(),
   getDocs: jest.fn(),
@@ -38,81 +35,110 @@ describe('subscribeToPttPosts', () => {
     jest.clearAllMocks();
   });
 
-  type FakeDocs = { id: string; data: () => { posts?: PttPush[] } }[];
-  type SnapshotHandler = (snap: { docs: FakeDocs }) => void;
+  type SnapHandler = (snap: { data: () => { posts?: PttPush[] } | undefined }) => void;
 
-  function captureHandler(): { get: () => SnapshotHandler } {
-    let handler: SnapshotHandler = () => {};
-    mockOnSnapshot.mockImplementation((_query: unknown, next: SnapshotHandler) => {
-      handler = next;
-      return () => {};
+  /** 依 doc() 傳入的文件 ID 記錄各分片的 onSnapshot handler 與取消函數 */
+  function captureHandlers() {
+    const handlers = new Map<string, SnapHandler>();
+    const unsubscribers = new Map<string, jest.Mock>();
+    mockDoc.mockImplementation((...args: unknown[]) => args[args.length - 1] as string);
+    mockOnSnapshot.mockImplementation((docId: string, handler: SnapHandler) => {
+      handlers.set(docId, handler);
+      const unsubscribe = jest.fn();
+      unsubscribers.set(docId, unsubscribe);
+      return unsubscribe;
     });
-    return { get: () => handler };
+    return { handlers, unsubscribers };
   }
 
   const makePush = (userid: string): PttPush => ({ push_tag: '推', userid, content: 'hi', time: '08/06 13:31' });
+  const makeFullPart = (): PttPush[] => Array.from({ length: PTT_MAX_POSTS_PER_PART }, (_, i) => makePush(`f${i}`));
 
-  it('用文件 ID 前綴範圍查詢 {date}_{session} 與其所有分片', () => {
-    mockOnSnapshot.mockReturnValue(() => {});
+  afterEach(() => {
+    mockDoc.mockImplementation(() => 'fake-doc-ref');
+  });
+
+  it('用 {date}_{session} 組出第 1 片文件路徑並訂閱', () => {
+    const { handlers } = captureHandlers();
 
     subscribeToPttPosts('intraday', '20260806', jest.fn());
 
-    expect(mockCollection).toHaveBeenCalledWith({}, 'pttPosts');
-    expect(mockWhere).toHaveBeenCalledWith('DOC_ID_FIELD', '>=', '20260806_intraday');
-    expect(mockWhere).toHaveBeenCalledWith('DOC_ID_FIELD', '<=', '20260806_intraday');
-    expect(mockOnSnapshot).toHaveBeenCalled();
+    expect(mockDoc).toHaveBeenCalledWith({}, 'pttPosts', '20260806_intraday');
+    expect([...handlers.keys()]).toEqual(['20260806_intraday']);
   });
 
   it('收到新資料時，把 posts 陣列傳給 callback', () => {
-    const { get } = captureHandler();
+    const { handlers } = captureHandlers();
     const callback = jest.fn();
     const posts = [makePush('a')];
 
     subscribeToPttPosts('afterhours', '20260806', callback);
-    get()({ docs: [{ id: '20260806_afterhours', data: () => ({ posts }) }] });
+    handlers.get('20260806_afterhours')!({ data: () => ({ posts }) });
 
     expect(callback).toHaveBeenCalledWith(posts);
   });
 
-  it('沒有任何文件時，callback 收到空陣列', () => {
-    const { get } = captureHandler();
+  it('文件不存在時，callback 收到空陣列', () => {
+    const { handlers } = captureHandlers();
     const callback = jest.fn();
 
     subscribeToPttPosts('intraday', '20260806', callback);
-    get()({ docs: [] });
+    handlers.get('20260806_intraday')!({ data: () => undefined });
 
     expect(callback).toHaveBeenCalledWith([]);
   });
 
-  it('多個分片依分片序號（數字順序，p10 在 p2 之後）串接成同一個陣列', () => {
-    const { get } = captureHandler();
-    const callback = jest.fn();
+  it('第 1 片未寫滿時不會訂閱下一片', () => {
+    const { handlers } = captureHandlers();
 
-    subscribeToPttPosts('afterhours', '20260806', callback);
-    get()({
-      docs: [
-        { id: '20260806_afterhours_p10', data: () => ({ posts: [makePush('p10')] }) },
-        { id: '20260806_afterhours_p2', data: () => ({ posts: [makePush('p2')] }) },
-        { id: '20260806_afterhours', data: () => ({ posts: [makePush('p1')] }) },
-      ],
-    });
+    subscribeToPttPosts('intraday', '20260806', jest.fn());
+    handlers.get('20260806_intraday')!({ data: () => ({ posts: [makePush('a')] }) });
 
-    expect(callback).toHaveBeenCalledWith([makePush('p1'), makePush('p2'), makePush('p10')]);
+    expect([...handlers.keys()]).toEqual(['20260806_intraday']);
   });
 
-  it('忽略同前綴但格式不符的文件', () => {
-    const { get } = captureHandler();
+  it('某一片寫滿就接著訂閱下一片，且所有分片的第一次快照到齊後才回呼並依序串接', () => {
+    const { handlers } = captureHandlers();
     const callback = jest.fn();
+    const full = makeFullPart();
 
     subscribeToPttPosts('afterhours', '20260806', callback);
-    get()({
-      docs: [
-        { id: '20260806_afterhours', data: () => ({ posts: [makePush('p1')] }) },
-        { id: '20260806_afterhours_backup', data: () => ({ posts: [makePush('bad')] }) },
-      ],
-    });
+    handlers.get('20260806_afterhours')!({ data: () => ({ posts: full }) });
 
-    expect(callback).toHaveBeenCalledWith([makePush('p1')]);
+    expect([...handlers.keys()]).toEqual(['20260806_afterhours', '20260806_afterhours_p2']);
+    expect(callback).not.toHaveBeenCalled();
+
+    handlers.get('20260806_afterhours_p2')!({ data: () => ({ posts: [makePush('p2')] }) });
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledWith([...full, makePush('p2')]);
+  });
+
+  it('第 2 片之後有更新時，會用最新內容重新串接並回呼', () => {
+    const { handlers } = captureHandlers();
+    const callback = jest.fn();
+    const full = makeFullPart();
+
+    subscribeToPttPosts('afterhours', '20260806', callback);
+    handlers.get('20260806_afterhours')!({ data: () => ({ posts: full }) });
+    handlers.get('20260806_afterhours_p2')!({ data: () => ({ posts: [makePush('p2')] }) });
+    handlers.get('20260806_afterhours_p2')!({ data: () => ({ posts: [makePush('p2'), makePush('p2b')] }) });
+
+    expect(callback).toHaveBeenLastCalledWith([...full, makePush('p2'), makePush('p2b')]);
+  });
+
+  it('取消訂閱時會取消所有分片的監聽，且之後不再回呼', () => {
+    const { handlers, unsubscribers } = captureHandlers();
+    const callback = jest.fn();
+
+    const unsubscribe = subscribeToPttPosts('afterhours', '20260806', callback);
+    handlers.get('20260806_afterhours')!({ data: () => ({ posts: makeFullPart() }) });
+    unsubscribe();
+    handlers.get('20260806_afterhours_p2')!({ data: () => ({ posts: [makePush('late')] }) });
+
+    expect(unsubscribers.get('20260806_afterhours')).toHaveBeenCalled();
+    expect(unsubscribers.get('20260806_afterhours_p2')).toHaveBeenCalled();
+    expect(callback).not.toHaveBeenCalled();
   });
 });
 

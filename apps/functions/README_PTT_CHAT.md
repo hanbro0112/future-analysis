@@ -65,7 +65,7 @@ users/{uid}/setting/pttReadState
 - Firestore 單一文件上限 1 MiB（每則推文約 190 bytes），所以 `pttPosts` 會**分片**：
   每片最多 `MAX_POSTS_PER_PART`（5000）則，寫滿才換下一片 `_p{n}`；`pttThreads.part` 記錄目前寫到第幾片，
   寫入前還會讀取目前分片的實際筆數，已滿（含舊資料尚未有 `part` 欄位）就自動往後找第一個未滿的分片
-- 前端用文件 ID 前綴範圍查詢一次訂閱所有分片，依分片序號串接成同一個陣列，
+- 前端逐片以單一文件訂閱（第 1 片寫滿 5000 則才接著訂閱下一片，前端常數 `PTT_MAX_POSTS_PER_PART` 需與後端一致），依序串接成同一個陣列，
   `last_read_index` 沿用串接後的絕對索引；已寫滿的分片不再變動，每分鐘只會推送最新那一片
 - 前端為避免一次渲染上萬則造成卡頓，預設只渲染最新 500 則，捲到頂會自動往前多渲染 500 則；已讀位置在渲染範圍之外時，以該位置為中心重設範圍，捲到底再自動往後多渲染 500 則
 
@@ -137,7 +137,7 @@ gcloud scheduler jobs create http ptt-chat-job \
 沒有用 `1-5` 排除週末——PTT 板面本身沒有交易日限制，`resolve_current_session`/
 `resolve_session_date` 已經處理假日延續盤後閒聊的邏輯，排程本身不需要跳過假日。
 
-也需要把 [firestore.rules](../../firestore.rules) 裡新增的 `pttThreads` / `pttPosts` /
+也需要把 [firestore.rules](../../firestore.rules) 裡新增的 `pttPosts`（僅限最近 5 天，`pttThreads` 前端不可讀）/
 `users/{uid}/setting/pttReadState`（文件名寫死，不開放同路徑下其他文件）規則部署到專案，
 在 GitHub Actions 手動觸發
 [.github/workflows/deploy-firebase-rules.yml](../../.github/workflows/deploy-firebase-rules.yml) 即可。
