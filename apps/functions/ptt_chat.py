@@ -40,6 +40,14 @@ SESSION_TITLE_KEYWORD: dict[Session, str] = {
 CASH_MARKET_OPEN_MINUTES = 8 * 60 + 30  # 08:30，盤中閒聊開始
 CASH_MARKET_CLOSE_MINUTES = 14 * 60  # 14:00，盤後閒聊開始
 
+# Firestore 單一文件上限 1 MiB，每則推文約 190 bytes，單一分片寫滿 5000 則（約 1 MB 以下留緩衝）再換下一片
+MAX_POSTS_PER_PART = 5000
+
+
+def build_posts_doc_id(base_doc_id: str, part: int) -> str:
+    """第 1 片沿用 `{date}_{session}`，之後為 `{date}_{session}_p{n}`"""
+    return base_doc_id if part <= 1 else f"{base_doc_id}_p{part}"
+
 
 def _last_trading_day(date: datetime) -> datetime:
     """若 date 落在週末，往前推到最近的週五（不含國定假日判斷）"""
@@ -211,6 +219,47 @@ class PttChatCrawler:
         print(f"⚠️  找不到上次記錄的推文指紋（可能已被 PTT 隱藏），視為全部新增: {last_fingerprint}")
         return pushes
 
+    def _count_posts(self, doc_id: str) -> int:
+        """讀取指定 pttPosts 分片目前已有幾則推文，文件不存在回傳 0"""
+        snapshot = self.firestore_writer.db.collection("pttPosts").document(doc_id).get()
+        if not snapshot.exists:
+            return 0
+        return len((snapshot.to_dict() or {}).get("posts") or [])
+
+    def write_new_pushes(self, base_doc_id: str, start_part: int, new_pushes: list[Push]) -> int:
+        """
+        將新推文依序填入分片，每片最多 MAX_POSTS_PER_PART 則，寫滿才換下一片
+
+        Args:
+            base_doc_id: `{date}_{session}`
+            start_part: 從哪一片開始（來自 pttThreads.part，預設 1）
+            new_pushes: 要寫入的新推文
+
+        Returns:
+            最後寫入（或目前可繼續寫入）的分片編號
+        """
+        part = start_part
+        count = self._count_posts(build_posts_doc_id(base_doc_id, part))
+        # 目前分片已滿（含舊資料尚未記錄 part 的情況）就往後找第一個未滿的分片
+        while count >= MAX_POSTS_PER_PART:
+            part += 1
+            count = self._count_posts(build_posts_doc_id(base_doc_id, part))
+
+        remaining = new_pushes
+        while remaining:
+            capacity = MAX_POSTS_PER_PART - count
+            chunk, remaining = remaining[:capacity], remaining[capacity:]
+            self.firestore_writer.write_document(
+                collection="pttPosts",
+                document_id=build_posts_doc_id(base_doc_id, part),
+                data={"posts": firestore.ArrayUnion(chunk)},
+                merge=True,
+            )
+            if remaining:
+                part += 1
+                count = 0
+        return part
+
     def run(self, now: Optional[datetime] = None) -> str:
         """
         執行一次爬取（由 Cloud Scheduler 每分鐘觸發）
@@ -235,6 +284,7 @@ class PttChatCrawler:
         is_same_day = thread_data.get("date") == target_date_key
         article_url = thread_data.get("article_url") if is_same_day else None
         last_fingerprint = thread_data.get("last_fingerprint") if is_same_day else None
+        start_part = int(thread_data.get("part") or 1) if is_same_day else 1
 
         if not article_url:
             date_title_str = target_date.strftime("%Y/%m/%d")
@@ -248,7 +298,7 @@ class PttChatCrawler:
             self.firestore_writer.write_document(
                 collection="pttThreads",
                 document_id=session,
-                data={"date": target_date_key, "article_url": article_url, "last_fingerprint": None},
+                data={"date": target_date_key, "article_url": article_url, "last_fingerprint": None, "part": 1},
                 merge=True,
             )
             print(f"✅ 已鎖定文章: {article_url}")
@@ -261,16 +311,19 @@ class PttChatCrawler:
         if not new_pushes:
             return "無新增推文"
 
-        self.firestore_writer.write_document(
-            collection="pttPosts",
-            document_id=posts_doc_id,
-            data={"posts": firestore.ArrayUnion(new_pushes)},
-            merge=True,
-        )
+        try:
+            part = self.write_new_pushes(posts_doc_id, start_part, new_pushes)
+        except Exception as e:
+            print(f"❌ 寫入 pttPosts/{posts_doc_id} 失敗（起始分片 {start_part}，{len(new_pushes)} 則推文）: {e}")
+            raise
         self.firestore_writer.write_document(
             collection="pttThreads",
             document_id=session,
-            data={"date": target_date_key, "last_fingerprint": self.compute_fingerprint(pushes[-1])},
+            data={
+                "date": target_date_key,
+                "part": part,
+                "last_fingerprint": self.compute_fingerprint(pushes[-1]),
+            },
             merge=True,
         )
 

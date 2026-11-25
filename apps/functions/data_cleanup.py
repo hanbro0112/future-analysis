@@ -44,7 +44,8 @@ MARKET_SUBCOLLECTION_RE = re.compile(r"^(\d{8})(?:_tick)?$")
 DAILY_REPORTS_COLLECTION = "daily_reports"
 DAILY_REPORT_ID_RE = re.compile(r"^(\d{8})$")
 PTT_POSTS_COLLECTION = "pttPosts"
-PTT_POST_ID_RE = re.compile(r"^(\d{8})_[A-Za-z]+$")
+# 含分片文件：{date}_{session} 與 {date}_{session}_p{n}
+PTT_POST_ID_RE = re.compile(r"^(\d{8})_[A-Za-z]+(?:_p\d+)?$")
 
 STORAGE_BUCKET_ENV_NAME = "STORAGE_BUCKET_NAME"
 STORAGE_PREFIX = "chip-reports/"

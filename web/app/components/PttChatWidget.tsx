@@ -5,7 +5,7 @@
  * 固定右下角，顯示後端每分鐘爬取的盤中/盤後閒聊推文，並記錄使用者捲動到的已讀位置
  */
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import {
   subscribeToPttPosts,
@@ -23,6 +23,14 @@ const DEFAULT_WIDTH_PX = 640;
 const DEFAULT_HEIGHT_PX = 600;
 const MIN_WIDTH_PX = 320;
 const MIN_HEIGHT_PX = 256;
+// 一天的推文可能上萬則，一次渲染會卡頓：預設只渲染最新的 N 則，捲到頂/底時再自動展開更多
+const INITIAL_VISIBLE_COUNT = 500;
+const LOAD_MORE_STEP = 500;
+// 已讀位置在渲染範圍之外時，以該位置為中心重新決定渲染範圍：往前多展開一些上下文，往後渲染一批
+const RESTORE_CONTEXT_BEFORE = 50;
+const RESTORE_CONTEXT_AFTER = 450;
+// 距離頂/底多少 px 內視為「捲到頂/底」
+const SCROLL_EDGE_THRESHOLD_PX = 20;
 
 const SESSION_LABEL: Record<PttSession, string> = {
   intraday: '盤中閒聊',
@@ -43,6 +51,10 @@ export default function PttChatWidget() {
   // null 代表尚未從 Firestore 載入完成，跟「已載入、確實無已讀紀錄」的 -1 分開表示，避免誤判
   const [lastReadIndex, setLastReadIndex] = useState<number | null>(null);
   const [size, setSize] = useState({ width: DEFAULT_WIDTH_PX, height: DEFAULT_HEIGHT_PX });
+  // 目前渲染範圍的起點（posts 的絕對索引）；null 代表尚未決定（首批推文載入後鎖定為最新 N 則）
+  const [windowStart, setWindowStart] = useState<number | null>(null);
+  // 渲染範圍的終點（不含）；null 代表一路跟著最新推文
+  const [windowEnd, setWindowEnd] = useState<number | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
   // 每個 session_date 各自獨立的 debounce timer，避免切分頁時互相取消對方還沒觸發的寫入
@@ -52,6 +64,11 @@ export default function PttChatWidget() {
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, width: 0, height: 0 });
   const observerRef = useRef<IntersectionObserver | null>(null);
   const maxVisibleIndexRef = useRef(-1);
+  // 按「載入更早」前記錄的 scrollHeight，用來在插入舊訊息後維持原本的捲動位置
+  const prevScrollHeightRef = useRef<number | null>(null);
+
+  const startIndex = windowStart ?? Math.max(0, posts.length - INITIAL_VISIBLE_COUNT);
+  const endIndex = Math.min(windowEnd ?? posts.length, posts.length);
 
   const dateStr = useMemo(() => getPttSessionDate(session), [session]);
   const uid = user?.uid;
@@ -86,8 +103,28 @@ export default function PttChatWidget() {
   useEffect(() => {
     if (!uid) return;
 
+    // 換分頁/日期時清掉舊資料與渲染範圍，避免用上一個分頁的推文數決定新分頁的起點
+    setPosts([]);
+    setWindowStart(null);
+    setWindowEnd(null);
     return subscribeToPttPosts(session, dateStr, setPosts);
   }, [uid, session, dateStr]);
+
+  // 首批推文載入後鎖定渲染起點，之後新推文只會往後附加，不會讓最上面的訊息被擠掉
+  useEffect(() => {
+    if (windowStart === null && posts.length > 0) {
+      setWindowStart(Math.max(0, posts.length - INITIAL_VISIBLE_COUNT));
+    }
+  }, [windowStart, posts.length]);
+
+  // 載入更早的訊息後，補償新增內容的高度，維持使用者原本看到的位置
+  useLayoutEffect(() => {
+    const container = listRef.current;
+    if (prevScrollHeightRef.current === null || !container) return;
+
+    container.scrollTop += container.scrollHeight - prevScrollHeightRef.current;
+    prevScrollHeightRef.current = null;
+  }, [startIndex]);
 
   // 每次展開時，重新捲動到上次已讀位置（若無記錄則從第一則訊息開始）
   useEffect(() => {
@@ -110,10 +147,18 @@ export default function PttChatWidget() {
     }
 
     const targetIndex = lastReadIndex < posts.length ? lastReadIndex : posts.length - 1;
+    if (targetIndex < startIndex) {
+      // 已讀位置在目前渲染範圍之前，以該位置為中心重設範圍，等範圍更新後本 effect 會再執行一次
+      const nextEnd = targetIndex + RESTORE_CONTEXT_AFTER;
+      setWindowStart(Math.max(0, targetIndex - RESTORE_CONTEXT_BEFORE));
+      setWindowEnd(nextEnd >= posts.length ? null : nextEnd);
+      return;
+    }
+
     const targetEl = container.querySelector<HTMLElement>(`[data-push-index="${targetIndex}"]`);
     targetEl?.scrollIntoView({ block: 'end' });
     hasRestoredScrollRef.current = true;
-  }, [isOpen, posts, lastReadIndex]);
+  }, [isOpen, posts, lastReadIndex, startIndex]);
 
   useEffect(() => {
     return () => {
@@ -196,7 +241,24 @@ export default function PttChatWidget() {
     container.querySelectorAll<HTMLElement>('[data-push-index]').forEach((item) => {
       observer.observe(item);
     });
-  }, [isOpen, posts.length]);
+  }, [isOpen, posts.length, startIndex]);
+
+  // 捲到頂自動往前多渲染一批舊訊息，捲到底自動往後多渲染一批（範圍尚未到最新時）
+  const handleListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const container = event.currentTarget;
+
+    if (container.scrollTop <= SCROLL_EDGE_THRESHOLD_PX && startIndex > 0 && prevScrollHeightRef.current === null) {
+      prevScrollHeightRef.current = container.scrollHeight;
+      setWindowStart(Math.max(0, startIndex - LOAD_MORE_STEP));
+      return;
+    }
+
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceToBottom <= SCROLL_EDGE_THRESHOLD_PX && endIndex < posts.length) {
+      const nextEnd = endIndex + LOAD_MORE_STEP;
+      setWindowEnd(nextEnd >= posts.length ? null : nextEnd);
+    }
+  }, [startIndex, endIndex, posts.length]);
 
   // 視窗固定在右下角，左上角把手往外拖會變大（維持右下角貼齊畫面角落）
   const handleResizeMouseDown = useCallback((event: React.MouseEvent) => {
@@ -291,11 +353,18 @@ export default function PttChatWidget() {
         </button>
       </div>
 
-      <div ref={listRef} data-testid="ptt-message-list" className="flex-1 overflow-y-auto px-3 py-2 space-y-1 text-base">
+      <div
+        ref={listRef}
+        data-testid="ptt-message-list"
+        onScroll={handleListScroll}
+        style={{ overflowAnchor: 'none' }}
+        className="flex-1 overflow-y-auto px-3 py-2 space-y-1 text-base"
+      >
         {posts.length === 0 ? (
           <p className="text-gray-400 dark:text-gray-500 text-center mt-8">尚無訊息</p>
         ) : (
-          posts.map((push, index) => {
+          posts.slice(startIndex, endIndex).map((push, offset) => {
+            const index = startIndex + offset;
             const imageUrls = extractImageUrls(push.content);
             return (
               <p key={index} data-push-index={index} className="leading-snug break-words">

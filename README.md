@@ -317,8 +317,8 @@ pttThreads (Collection - 只有 intraday / afterhours 兩份文件，隔天直�
         └── created_at / updated_at (Timestamp)
 
 pttPosts (Collection - 依日期保留歷史)
-  ┗ 📄 20260617_intraday (Document ID: {YYYYMMDD}_{session})
-        ├── posts: [ { userid, content, push_tag, time }, ... ] (Array - 該篇文章的推文)
+  ┗ 📄 20260617_intraday (Document ID: {YYYYMMDD}_{session}；超過 5000 則分片為 {YYYYMMDD}_{session}_p2、_p3...)
+        ├── posts: [ { userid, content, push_tag, time }, ... ] (Array - 該篇文章的推文，每片最多 5000 則)
         └── created_at / updated_at (Timestamp)
 
 users (Collection)

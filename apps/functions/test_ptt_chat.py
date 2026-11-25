@@ -83,8 +83,9 @@ class FakeDocSnapshot:
 class FakeFirestoreWriter:
     """duck-typed 假 FirestoreWriter，不連線真的 Firestore"""
 
-    def __init__(self, thread_snapshot: FakeDocSnapshot):
+    def __init__(self, thread_snapshot: FakeDocSnapshot, posts_snapshots: dict[str, FakeDocSnapshot] | None = None):
         self._thread_snapshot = thread_snapshot
+        self._posts_snapshots = posts_snapshots or {}
         self.write_calls: list[dict] = []
 
     @property
@@ -92,16 +93,25 @@ class FakeFirestoreWriter:
         writer = self
 
         class _DocRef:
+            def __init__(self_inner, collection_name, doc_id):
+                self_inner._collection_name = collection_name
+                self_inner._doc_id = doc_id
+
             def get(self_inner):
+                if self_inner._collection_name == "pttPosts":
+                    return writer._posts_snapshots.get(self_inner._doc_id, FakeDocSnapshot(exists=False))
                 return writer._thread_snapshot
 
         class _Collection:
+            def __init__(self_inner, name):
+                self_inner._name = name
+
             def document(self_inner, doc_id):
-                return _DocRef()
+                return _DocRef(self_inner._name, doc_id)
 
         class _Db:
             def collection(self_inner, name):
-                return _Collection()
+                return _Collection(name)
 
         return _Db()
 
@@ -352,3 +362,108 @@ def test_run_writes_new_pushes_when_article_already_resolved(monkeypatch):
     assert thread_write["data"]["last_fingerprint"] == PttChatCrawler.compute_fingerprint(
         crawler.fetch_pushes(article_url)[-1]
     )
+
+
+def _make_pushes(count: int, prefix: str = "u") -> list[dict]:
+    return [
+        {"push_tag": "推", "userid": f"{prefix}{i}", "content": f"msg{i}", "time": "08/06 10:00"}
+        for i in range(count)
+    ]
+
+
+def _make_writer_with_posts(existing: dict[str, int]) -> FakeFirestoreWriter:
+    """existing: {pttPosts 文件 ID: 已有推文數}"""
+    return FakeFirestoreWriter(
+        FakeDocSnapshot(exists=False),
+        {doc_id: FakeDocSnapshot(exists=True, data={"posts": _make_pushes(n)}) for doc_id, n in existing.items()},
+    )
+
+
+def test_build_posts_doc_id_first_part_keeps_legacy_id():
+    assert ptt_chat.build_posts_doc_id("20260806_intraday", 1) == "20260806_intraday"
+    assert ptt_chat.build_posts_doc_id("20260806_intraday", 3) == "20260806_intraday_p3"
+
+
+def test_write_new_pushes_writes_to_first_part_when_not_full():
+    writer = _make_writer_with_posts({"20260806_intraday": 10})
+    crawler = PttChatCrawler(writer)
+
+    part = crawler.write_new_pushes("20260806_intraday", 1, _make_pushes(5))
+
+    assert part == 1
+    assert [c["document_id"] for c in writer.write_calls] == ["20260806_intraday"]
+
+
+def test_write_new_pushes_splits_across_parts_when_exceeding_limit():
+    """第 1 片只剩 3 則空位時，前 3 則寫第 1 片，其餘寫第 2 片"""
+    writer = _make_writer_with_posts({"20260806_intraday": ptt_chat.MAX_POSTS_PER_PART - 3})
+    crawler = PttChatCrawler(writer)
+    new_pushes = _make_pushes(10, prefix="n")
+
+    part = crawler.write_new_pushes("20260806_intraday", 1, new_pushes)
+
+    assert part == 2
+    assert [c["document_id"] for c in writer.write_calls] == ["20260806_intraday", "20260806_intraday_p2"]
+    assert writer.write_calls[0]["data"]["posts"] == firestore.ArrayUnion(new_pushes[:3])
+    assert writer.write_calls[1]["data"]["posts"] == firestore.ArrayUnion(new_pushes[3:])
+
+
+def test_write_new_pushes_skips_full_legacy_doc_without_part_record():
+    """舊資料沒有 part 欄位（預設 1）且第 1 片已滿，要自動改寫第 2 片"""
+    writer = _make_writer_with_posts({"20260806_intraday": ptt_chat.MAX_POSTS_PER_PART + 460})
+    crawler = PttChatCrawler(writer)
+
+    part = crawler.write_new_pushes("20260806_intraday", 1, _make_pushes(2))
+
+    assert part == 2
+    assert [c["document_id"] for c in writer.write_calls] == ["20260806_intraday_p2"]
+
+
+def test_write_new_pushes_skips_multiple_full_parts():
+    writer = _make_writer_with_posts({
+        "20260806_intraday": ptt_chat.MAX_POSTS_PER_PART,
+        "20260806_intraday_p2": ptt_chat.MAX_POSTS_PER_PART,
+    })
+    crawler = PttChatCrawler(writer)
+
+    part = crawler.write_new_pushes("20260806_intraday", 1, _make_pushes(1))
+
+    assert part == 3
+    assert writer.write_calls[0]["document_id"] == "20260806_intraday_p3"
+
+
+def test_run_records_part_in_thread_and_resumes_from_it(monkeypatch):
+    article_url = "https://www.ptt.cc/bbs/Stock/M.1785976206.A.458.html"
+    writer = FakeFirestoreWriter(
+        FakeDocSnapshot(
+            exists=True,
+            data={"date": "20260806", "article_url": article_url, "last_fingerprint": None, "part": 2},
+        ),
+        {"20260806_intraday_p2": FakeDocSnapshot(exists=True, data={"posts": _make_pushes(10)})},
+    )
+    crawler = PttChatCrawler(writer)
+    monkeypatch.setattr(ptt_chat.requests, "get", lambda *a, **k: FakeResponse(ARTICLE_HTML))
+
+    crawler.run(now=datetime(2026, 8, 6, 10, 30))
+
+    posts_write = next(c for c in writer.write_calls if c["collection"] == "pttPosts")
+    thread_write = next(c for c in writer.write_calls if c["collection"] == "pttThreads")
+    assert posts_write["document_id"] == "20260806_intraday_p2"
+    assert thread_write["data"]["part"] == 2
+
+
+def test_run_does_not_advance_fingerprint_when_posts_write_fails(monkeypatch):
+    article_url = "https://www.ptt.cc/bbs/Stock/M.1785976206.A.458.html"
+    writer = FakeFirestoreWriter(
+        FakeDocSnapshot(exists=True, data={"date": "20260806", "article_url": article_url, "last_fingerprint": None})
+    )
+
+    def failing_write(collection, document_id, data, merge=False):
+        raise RuntimeError("400 exceeds the maximum size")
+
+    writer.write_document = failing_write
+    crawler = PttChatCrawler(writer)
+    monkeypatch.setattr(ptt_chat.requests, "get", lambda *a, **k: FakeResponse(ARTICLE_HTML))
+
+    with pytest.raises(RuntimeError):
+        crawler.run(now=datetime(2026, 8, 6, 10, 30))

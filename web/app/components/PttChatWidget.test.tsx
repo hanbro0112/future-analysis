@@ -391,6 +391,128 @@ describe('PttChatWidget', () => {
     }
   });
 
+  describe('大量推文的渲染範圍限制', () => {
+    const makeManyPosts = (count: number): PttPush[] =>
+      Array.from({ length: count }, (_, i) => ({
+        push_tag: '推',
+        userid: `user${i}`,
+        content: `訊息${i}`,
+        time: '08/06 10:00',
+      }));
+
+    /** jsdom 沒有版面，手動指定捲動容器尺寸後觸發 scroll 事件 */
+    function scrollList(list: HTMLElement, metrics: { scrollTop: number; scrollHeight: number; clientHeight: number }) {
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, value: metrics.scrollHeight });
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: metrics.clientHeight });
+      list.scrollTop = metrics.scrollTop;
+      fireEvent.scroll(list);
+    }
+
+    it('推文超過 500 則時只渲染最新 500 則', async () => {
+      mockSubscribeToPttPosts.mockImplementation((_s: unknown, _d: unknown, callback: (posts: PttPush[]) => void) => {
+        callback(makeManyPosts(1200));
+        return jest.fn();
+      });
+      mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
+
+      render(<PttChatWidget />);
+      expandWidget();
+
+      expect(await screen.findByText('訊息1199')).toBeInTheDocument();
+      expect(screen.getByText('訊息700')).toBeInTheDocument();
+      expect(screen.queryByText('訊息699')).not.toBeInTheDocument();
+      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(500);
+    });
+
+    it('捲到頂時自動多渲染 500 則更早的訊息，索引維持絕對位置', async () => {
+      mockSubscribeToPttPosts.mockImplementation((_s: unknown, _d: unknown, callback: (posts: PttPush[]) => void) => {
+        callback(makeManyPosts(1200));
+        return jest.fn();
+      });
+      mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
+
+      render(<PttChatWidget />);
+      expandWidget();
+      await screen.findByText('訊息1199');
+
+      scrollList(screen.getByTestId('ptt-message-list'), { scrollTop: 0, scrollHeight: 20000, clientHeight: 600 });
+
+      expect(await screen.findByText('訊息200')).toBeInTheDocument();
+      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(1000);
+      expect(document.querySelector('[data-push-index="200"]')).toBeInTheDocument();
+    });
+
+    it('捲動到中間（未到頂/底）時不會載入更多', async () => {
+      mockSubscribeToPttPosts.mockImplementation((_s: unknown, _d: unknown, callback: (posts: PttPush[]) => void) => {
+        callback(makeManyPosts(1200));
+        return jest.fn();
+      });
+      mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
+
+      render(<PttChatWidget />);
+      expandWidget();
+      await screen.findByText('訊息1199');
+
+      scrollList(screen.getByTestId('ptt-message-list'), { scrollTop: 5000, scrollHeight: 20000, clientHeight: 600 });
+
+      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(500);
+    });
+
+    it('渲染範圍尚未到最新時，捲到底會自動往後多渲染 500 則', async () => {
+      mockGetPttReadState.mockResolvedValue(100);
+      mockSubscribeToPttPosts.mockImplementation((_s: unknown, _d: unknown, callback: (posts: PttPush[]) => void) => {
+        callback(makeManyPosts(1200));
+        return jest.fn();
+      });
+      mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
+
+      render(<PttChatWidget />);
+      expandWidget();
+      // 已讀位置 100 → 渲染範圍重設為 [50, 550)，最新推文尚未渲染
+      await screen.findByText('訊息100');
+      expect(screen.queryByText('訊息1199')).not.toBeInTheDocument();
+      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(500);
+
+      scrollList(screen.getByTestId('ptt-message-list'), { scrollTop: 19400, scrollHeight: 20000, clientHeight: 600 });
+
+      expect(await screen.findByText('訊息1049')).toBeInTheDocument();
+      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(1000);
+    });
+
+    it('已讀位置在渲染範圍之前時，會自動往前展開並捲到該則', async () => {
+      mockGetPttReadState.mockResolvedValue(100);
+      mockSubscribeToPttPosts.mockImplementation((_s: unknown, _d: unknown, callback: (posts: PttPush[]) => void) => {
+        callback(makeManyPosts(1200));
+        return jest.fn();
+      });
+      mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
+      const scrollIntoViewSpy = jest.spyOn(Element.prototype, 'scrollIntoView');
+
+      render(<PttChatWidget />);
+      expandWidget();
+
+      expect(await screen.findByText('訊息100')).toBeInTheDocument();
+      await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled());
+      expect(screen.queryByText('訊息49')).not.toBeInTheDocument();
+
+      scrollIntoViewSpy.mockRestore();
+    });
+
+    it('推文不超過 500 則時，捲到頂/底都不會改變渲染範圍', async () => {
+      mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
+
+      render(<PttChatWidget />);
+      expandWidget();
+      await screen.findByText('大家早安！');
+
+      const list = screen.getByTestId('ptt-message-list');
+      scrollList(list, { scrollTop: 0, scrollHeight: 1000, clientHeight: 600 });
+      scrollList(list, { scrollTop: 400, scrollHeight: 1000, clientHeight: 600 });
+
+      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(samplePosts.length);
+    });
+  });
+
   it('切換分頁會用新的 session 重新訂閱', async () => {
     mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
 

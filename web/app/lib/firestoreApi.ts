@@ -2,7 +2,7 @@
  * Firestore 資料存取層
  * 讀取分鐘級期貨資料與每日分析
  */
-import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, setDoc, onSnapshot, documentId, Unsubscribe } from 'firebase/firestore';
 import type { DocumentData } from 'firebase/firestore';
 import { db } from './firebase';
 import { getLastTradingDay } from './tradingCalendar';
@@ -459,23 +459,38 @@ export function subscribeToPttPosts(
   date: string,
   callback: (posts: PttPush[]) => void
 ): Unsubscribe {
-  const docId = `${date}_${session}`;
-  const docRef = doc(db, 'pttPosts', docId);
+  // 單一文件有 1 MiB 上限，後端會把推文分成 {date}_{session}（第 1 片）、{date}_{session}_p2、_p3...
+  // 這裡用文件 ID 前綴範圍查詢一次訂閱所有分片，之後只有內容變動的分片會被推送
+  const baseDocId = `${date}_${session}`;
+  const partsQuery = query(
+    collection(db, 'pttPosts'),
+    where(documentId(), '>=', baseDocId),
+    where(documentId(), '<=', `${baseDocId}`)
+  );
 
-  return onSnapshot(docRef, (docSnap) => {
-    const data = docSnap.data();
-    const posts = (data?.posts as PttPush[] | undefined) || [];
-    const updatedAt = data?.updated_at?.toDate?.() ?? data?.updated_at ?? null;
+  return onSnapshot(partsQuery, (snapshot) => {
+    const parts: { part: number; posts: PttPush[] }[] = [];
+    snapshot.docs.forEach((docSnap) => {
+      const part = getPttPartNumber(docSnap.id, baseDocId);
+      if (part === null) return;
+      parts.push({ part, posts: (docSnap.data().posts as PttPush[] | undefined) || [] });
+    });
+    parts.sort((a, b) => a.part - b.part);
 
-    // TODO(debug): 排查前端收不到 PTT 訊息問題，之後移除
-    console.log(
-      `[PTT DEBUG] pttPosts/${docId} exists=${docSnap.exists()} posts=${posts.length} updated_at=${updatedAt}`
-    );
-
-    callback(posts);
+    callback(parts.flatMap(({ posts }) => posts));
   }, (error) => {
-    console.error(`❌ 監聽 PTT 閒聊訊息失敗 (pttPosts/${docId}):`, error);
+    console.error(`❌ 監聽 PTT 閒聊訊息失敗 (pttPosts/${baseDocId}*):`, error);
   });
+}
+
+/**
+ * 解析 PTT 分片文件 ID 的分片序號：`{base}` 為第 1 片，`{base}_p{n}` 為第 n 片，
+ * 其他同前綴但格式不符的文件回傳 null（會被忽略）
+ */
+function getPttPartNumber(docId: string, baseDocId: string): number | null {
+  if (docId === baseDocId) return 1;
+  const match = docId.slice(baseDocId.length).match(/^_p(\d+)$/);
+  return docId.startsWith(baseDocId) && match ? Number(match[1]) : null;
 }
 
 /**

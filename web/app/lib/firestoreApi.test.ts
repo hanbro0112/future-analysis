@@ -8,13 +8,18 @@ import {
 import type { PttPush } from '../types/pttChat';
 
 const mockDoc = jest.fn((..._args: unknown[]) => 'fake-doc-ref');
+const mockCollection = jest.fn((..._args: unknown[]) => 'fake-collection');
+const mockQuery = jest.fn((..._args: unknown[]) => 'fake-query');
+const mockWhere = jest.fn((..._args: unknown[]) => 'fake-where');
 const mockOnSnapshot = jest.fn();
 const mockGetDoc = jest.fn();
 const mockSetDoc = jest.fn();
 
 jest.mock('firebase/firestore', () => ({
-  collection: jest.fn(),
-  query: jest.fn(),
+  collection: (...args: unknown[]) => mockCollection(...args),
+  query: (...args: unknown[]) => mockQuery(...args),
+  where: (...args: unknown[]) => mockWhere(...args),
+  documentId: () => 'DOC_ID_FIELD',
   orderBy: jest.fn(),
   limit: jest.fn(),
   getDocs: jest.fn(),
@@ -33,44 +38,81 @@ describe('subscribeToPttPosts', () => {
     jest.clearAllMocks();
   });
 
-  it('用 {date}_{session} 組出文件路徑並訂閱', () => {
+  type FakeDocs = { id: string; data: () => { posts?: PttPush[] } }[];
+  type SnapshotHandler = (snap: { docs: FakeDocs }) => void;
+
+  function captureHandler(): { get: () => SnapshotHandler } {
+    let handler: SnapshotHandler = () => {};
+    mockOnSnapshot.mockImplementation((_query: unknown, next: SnapshotHandler) => {
+      handler = next;
+      return () => {};
+    });
+    return { get: () => handler };
+  }
+
+  const makePush = (userid: string): PttPush => ({ push_tag: '推', userid, content: 'hi', time: '08/06 13:31' });
+
+  it('用文件 ID 前綴範圍查詢 {date}_{session} 與其所有分片', () => {
     mockOnSnapshot.mockReturnValue(() => {});
 
     subscribeToPttPosts('intraday', '20260806', jest.fn());
 
-    expect(mockDoc).toHaveBeenCalledWith({}, 'pttPosts', '20260806_intraday');
+    expect(mockCollection).toHaveBeenCalledWith({}, 'pttPosts');
+    expect(mockWhere).toHaveBeenCalledWith('DOC_ID_FIELD', '>=', '20260806_intraday');
+    expect(mockWhere).toHaveBeenCalledWith('DOC_ID_FIELD', '<=', '20260806_intraday');
     expect(mockOnSnapshot).toHaveBeenCalled();
   });
 
   it('收到新資料時，把 posts 陣列傳給 callback', () => {
-    let snapshotHandler: (snap: { exists: () => boolean; data: () => { posts?: PttPush[] } | undefined }) => void =
-      () => {};
-    mockOnSnapshot.mockImplementation((_ref: unknown, handler: typeof snapshotHandler) => {
-      snapshotHandler = handler;
-      return () => {};
-    });
+    const { get } = captureHandler();
     const callback = jest.fn();
-    const posts: PttPush[] = [{ push_tag: '推', userid: 'a', content: 'hi', time: '08/06 13:31' }];
+    const posts = [makePush('a')];
 
     subscribeToPttPosts('afterhours', '20260806', callback);
-    snapshotHandler({ exists: () => true, data: () => ({ posts }) });
+    get()({ docs: [{ id: '20260806_afterhours', data: () => ({ posts }) }] });
 
     expect(callback).toHaveBeenCalledWith(posts);
   });
 
-  it('文件不存在時，callback 收到空陣列', () => {
-    let snapshotHandler: (snap: { exists: () => boolean; data: () => { posts?: PttPush[] } | undefined }) => void =
-      () => {};
-    mockOnSnapshot.mockImplementation((_ref: unknown, handler: typeof snapshotHandler) => {
-      snapshotHandler = handler;
-      return () => {};
-    });
+  it('沒有任何文件時，callback 收到空陣列', () => {
+    const { get } = captureHandler();
     const callback = jest.fn();
 
     subscribeToPttPosts('intraday', '20260806', callback);
-    snapshotHandler({ exists: () => false, data: () => undefined });
+    get()({ docs: [] });
 
     expect(callback).toHaveBeenCalledWith([]);
+  });
+
+  it('多個分片依分片序號（數字順序，p10 在 p2 之後）串接成同一個陣列', () => {
+    const { get } = captureHandler();
+    const callback = jest.fn();
+
+    subscribeToPttPosts('afterhours', '20260806', callback);
+    get()({
+      docs: [
+        { id: '20260806_afterhours_p10', data: () => ({ posts: [makePush('p10')] }) },
+        { id: '20260806_afterhours_p2', data: () => ({ posts: [makePush('p2')] }) },
+        { id: '20260806_afterhours', data: () => ({ posts: [makePush('p1')] }) },
+      ],
+    });
+
+    expect(callback).toHaveBeenCalledWith([makePush('p1'), makePush('p2'), makePush('p10')]);
+  });
+
+  it('忽略同前綴但格式不符的文件', () => {
+    const { get } = captureHandler();
+    const callback = jest.fn();
+
+    subscribeToPttPosts('afterhours', '20260806', callback);
+    get()({
+      docs: [
+        { id: '20260806_afterhours', data: () => ({ posts: [makePush('p1')] }) },
+        { id: '20260806_afterhours_backup', data: () => ({ posts: [makePush('bad')] }) },
+      ],
+    });
+
+    expect(callback).toHaveBeenCalledWith([makePush('p1')]);
   });
 });
 

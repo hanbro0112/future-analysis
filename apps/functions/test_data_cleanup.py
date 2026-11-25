@@ -164,6 +164,8 @@ def test_compute_cutoff_uses_taipei_date() -> None:
         ("20260101_x", DAILY_REPORT_ID_RE, None),
         ("20260101_intraday", PTT_POST_ID_RE, date(2026, 1, 1)),
         ("20260101_afterhours", PTT_POST_ID_RE, date(2026, 1, 1)),
+        ("20260101_afterhours_p2", PTT_POST_ID_RE, date(2026, 1, 1)),
+        ("20260101_afterhours_backup", PTT_POST_ID_RE, None),
         ("20260101", PTT_POST_ID_RE, None),
     ],
 )

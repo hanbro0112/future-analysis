@@ -36,9 +36,10 @@ web/app/
 
 ```
 pttThreads/{session}
-  { date: string, article_url: string, last_fingerprint: string | null, updated_at }
+  { date: string, article_url: string, last_fingerprint: string | null, part: number, updated_at }
 
-pttPosts/{date}_{session}
+pttPosts/{date}_{session}          # 第 1 片
+pttPosts/{date}_{session}_p{n}     # 第 n 片（n >= 2）
   { posts: [ { userid, content, push_tag, time }, ... ], updated_at }
 
 users/{uid}/setting/pttReadState
@@ -60,9 +61,13 @@ users/{uid}/setting/pttReadState
   視窗大小（`width`/`height`）也存在同一份文件；寫入時用 dot-notation（例如
   `intraday.last_read_index`）做局部更新，彼此不會互相覆蓋，捲動位置與拖曳調整視窗大小都是
   「停止操作 10 秒後才寫入」的 debounce
-- `pttPosts` 才是實際聊天內容，依日期各自保留歷史，整篇文章的推文存在同一個文件的
-  `posts` 陣列（用 `ArrayUnion` 附加），沒有分片機制，超過 Firestore 單一文件 1 MiB
-  上限時後續推文會寫入失敗
+- `pttPosts` 才是實際聊天內容，依日期各自保留歷史，推文存在 `posts` 陣列（用 `ArrayUnion` 附加）
+- Firestore 單一文件上限 1 MiB（每則推文約 190 bytes），所以 `pttPosts` 會**分片**：
+  每片最多 `MAX_POSTS_PER_PART`（5000）則，寫滿才換下一片 `_p{n}`；`pttThreads.part` 記錄目前寫到第幾片，
+  寫入前還會讀取目前分片的實際筆數，已滿（含舊資料尚未有 `part` 欄位）就自動往後找第一個未滿的分片
+- 前端用文件 ID 前綴範圍查詢一次訂閱所有分片，依分片序號串接成同一個陣列，
+  `last_read_index` 沿用串接後的絕對索引；已寫滿的分片不再變動，每分鐘只會推送最新那一片
+- 前端為避免一次渲染上萬則造成卡頓，預設只渲染最新 500 則，捲到頂會自動往前多渲染 500 則；已讀位置在渲染範圍之外時，以該位置為中心重設範圍，捲到底再自動往後多渲染 500 則
 
 ## 爬蟲流程（每分鐘執行一次）
 
@@ -72,13 +77,13 @@ users/{uid}/setting/pttReadState
    找到後連同 `date` 一起覆蓋寫入 `pttThreads/{session}`，`last_fingerprint` 歸零
 3. 抓文章頁推文，用 `last_fingerprint` 找出新增的部分
    （指紋在畫面上找不到代表被 PTT 隱藏吃掉了，視為全部新增，記警告 log）
-4. 用 `ArrayUnion` 寫入 `pttPosts.posts`，並更新 `pttThreads.last_fingerprint`
+4. 用 `ArrayUnion` 依序填入 `pttPosts` 分片（寫滿 5000 則換下一片），並更新 `pttThreads.last_fingerprint` 與 `part`
 
 ## 已知限制
 
 - PTT 網頁版推文數過多時會隱藏中段內容（畫面上會出現「檔案過大！部分文章無法顯示」），
   爬蟲已排除這個提示區塊，但代表無法保證 100% 完整抓到，極端爆量時段中間可能會漏接
-- `pttPosts` 沒有分片，單一文件頂到 Firestore 1 MiB 上限後，當天該 session 就不會再有新推文寫入
+- `MAX_POSTS_PER_PART` 以筆數估算大小，若單則推文內容異常長（例如貼大量文字）仍有極小機率讓單片超過 1 MiB
 - 沒有國定假日日曆，國定假日當天仍會被當成平日去嘗試解析盤中/盤後閒聊文章
 - 板面翻頁最多找 4 頁（`MAX_INDEX_PAGES_TO_SEARCH`），文章若在被爬蟲鎖定前就洗出這個範圍
   （板面流量極大、文章遲遲沒發文），仍然會找不到並持續跳過
