@@ -219,12 +219,35 @@ class PttChatCrawler:
         print(f"⚠️  找不到上次記錄的推文指紋（可能已被 PTT 隱藏），視為全部新增: {last_fingerprint}")
         return pushes
 
-    def _count_posts(self, doc_id: str) -> int:
-        """讀取指定 pttPosts 分片目前已有幾則推文，文件不存在回傳 0"""
+    def _read_posts(self, doc_id: str) -> list[Push]:
+        """讀取指定 pttPosts 分片目前已有的推文，文件不存在回傳空列表"""
         snapshot = self.firestore_writer.db.collection("pttPosts").document(doc_id).get()
         if not snapshot.exists:
-            return 0
-        return len((snapshot.to_dict() or {}).get("posts") or [])
+            return []
+        return (snapshot.to_dict() or {}).get("posts") or []
+
+    def _count_posts(self, doc_id: str) -> int:
+        """讀取指定 pttPosts 分片目前已有幾則推文，文件不存在回傳 0"""
+        return len(self._read_posts(doc_id))
+
+    def drop_stored_pushes(self, base_doc_id: str, pushes: list[Push]) -> list[Push]:
+        """
+        濾掉已經存在於任一分片的推文，保留原本順序
+
+        指紋游標失效（或尚未建立）時，會把畫面上可見的推文全部視為新推文，其中開頭那段
+        （例如下午的推文）其實早就寫入前面的分片；`ArrayUnion` 只會在同一份文件內去重，
+        不比對其他分片，直接寫入會讓舊訊息重複出現在新分片尾端（插在凌晨訊息前面），所以要先比對已存在的推文
+        """
+        stored_fingerprints: set[str] = set()
+        part = 1
+        while True:
+            stored = self._read_posts(build_posts_doc_id(base_doc_id, part))
+            if not stored:
+                break
+            stored_fingerprints.update(self.compute_fingerprint(push) for push in stored)
+            part += 1
+
+        return [push for push in pushes if self.compute_fingerprint(push) not in stored_fingerprints]
 
     def write_new_pushes(self, base_doc_id: str, start_part: int, new_pushes: list[Push]) -> int:
         """
@@ -308,6 +331,17 @@ class PttChatCrawler:
             return "本次未抓到任何推文"
 
         new_pushes = self.find_new_pushes(pushes, last_fingerprint)
+        has_valid_cursor = last_fingerprint is not None and len(new_pushes) < len(pushes)
+        if not has_valid_cursor:
+            new_pushes = self.drop_stored_pushes(posts_doc_id, new_pushes)
+            if not new_pushes:
+                # 畫面上的推文都已存在，只需把游標接回最新一則，避免之後每分鐘都重新比對
+                self.firestore_writer.write_document(
+                    collection="pttThreads",
+                    document_id=session,
+                    data={"date": target_date_key, "last_fingerprint": self.compute_fingerprint(pushes[-1])},
+                    merge=True,
+                )
         if not new_pushes:
             return "無新增推文"
 

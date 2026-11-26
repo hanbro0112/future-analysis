@@ -467,3 +467,70 @@ def test_run_does_not_advance_fingerprint_when_posts_write_fails(monkeypatch):
 
     with pytest.raises(RuntimeError):
         crawler.run(now=datetime(2026, 8, 6, 10, 30))
+
+
+def _stored_posts_writer(thread_data: dict, stored: dict[str, list[dict]]) -> FakeFirestoreWriter:
+    return FakeFirestoreWriter(
+        FakeDocSnapshot(exists=True, data=thread_data),
+        {doc_id: FakeDocSnapshot(exists=True, data={"posts": posts}) for doc_id, posts in stored.items()},
+    )
+
+
+def test_drop_stored_pushes_filters_across_all_parts_and_keeps_order():
+    stored_p1 = _make_pushes(3, prefix="a")
+    stored_p2 = _make_pushes(2, prefix="b")
+    writer = _stored_posts_writer({}, {"20260806_intraday": stored_p1, "20260806_intraday_p2": stored_p2})
+    crawler = PttChatCrawler(writer)
+    fresh = _make_pushes(2, prefix="c")
+
+    result = crawler.drop_stored_pushes("20260806_intraday", stored_p1 + stored_p2 + fresh)
+
+    assert result == fresh
+
+
+def test_run_does_not_duplicate_head_pushes_into_new_part_when_cursor_lost(monkeypatch):
+    """
+    指紋游標失效（被 PTT 隱藏）時，畫面開頭那段舊推文已寫在前一個分片，
+    不能再被寫進新分片尾端，否則下午的訊息會出現在凌晨訊息前面
+    """
+    article_url = "https://www.ptt.cc/bbs/Stock/M.1785976206.A.458.html"
+    head = _make_pushes(3, prefix="afternoon")
+    tail_new = _make_pushes(2, prefix="earlymorning")
+    visible_html = "<html><body>" + "".join(
+        f'<div class="push"><span class="push-tag">推</span><span class="push-userid">{p["userid"]}</span>'
+        f'<span class="push-content">: {p["content"]}</span><span class="push-ipdatetime"> {p["time"]}</span></div>'
+        for p in head + tail_new
+    ) + "</body></html>"
+    writer = _stored_posts_writer(
+        {"date": "20260806", "article_url": article_url, "last_fingerprint": "hidden-fingerprint", "part": 1},
+        {"20260806_intraday": head},
+    )
+    crawler = PttChatCrawler(writer)
+    monkeypatch.setattr(ptt_chat.requests, "get", lambda *a, **k: FakeResponse(visible_html))
+
+    message = crawler.run(now=datetime(2026, 8, 6, 10, 30))
+
+    assert "新增 2 則推文" in message
+    posts_write = next(c for c in writer.write_calls if c["collection"] == "pttPosts")
+    assert posts_write["data"]["posts"] == firestore.ArrayUnion(tail_new)
+
+
+def test_run_advances_cursor_when_all_visible_pushes_already_stored(monkeypatch):
+    article_url = "https://www.ptt.cc/bbs/Stock/M.1785976206.A.458.html"
+    writer_for_fetch = FakeFirestoreWriter(FakeDocSnapshot(exists=False))
+    visible = PttChatCrawler(writer_for_fetch)
+    monkeypatch.setattr(ptt_chat.requests, "get", lambda *a, **k: FakeResponse(ARTICLE_HTML))
+    stored = visible.fetch_pushes(article_url)
+
+    writer = _stored_posts_writer(
+        {"date": "20260806", "article_url": article_url, "last_fingerprint": "hidden-fingerprint", "part": 1},
+        {"20260806_intraday": stored},
+    )
+    crawler = PttChatCrawler(writer)
+
+    message = crawler.run(now=datetime(2026, 8, 6, 10, 30))
+
+    assert message == "無新增推文"
+    assert not any(c["collection"] == "pttPosts" for c in writer.write_calls)
+    thread_write = next(c for c in writer.write_calls if c["collection"] == "pttThreads")
+    assert thread_write["data"]["last_fingerprint"] == PttChatCrawler.compute_fingerprint(stored[-1])

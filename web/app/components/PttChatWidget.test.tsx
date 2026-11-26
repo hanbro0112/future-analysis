@@ -408,9 +408,9 @@ describe('PttChatWidget', () => {
       fireEvent.scroll(list);
     }
 
-    it('推文超過 500 則時只渲染最新 500 則', async () => {
+    it('推文超過 1200 則時只渲染最新 1200 則', async () => {
       mockSubscribeToPttPosts.mockImplementation((_s: unknown, _d: unknown, callback: (posts: PttPush[]) => void) => {
-        callback(makeManyPosts(1200));
+        callback(makeManyPosts(2500));
         return jest.fn();
       });
       mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
@@ -418,50 +418,50 @@ describe('PttChatWidget', () => {
       render(<PttChatWidget />);
       expandWidget();
 
-      expect(await screen.findByText('訊息1199')).toBeInTheDocument();
-      expect(screen.getByText('訊息700')).toBeInTheDocument();
-      expect(screen.queryByText('訊息699')).not.toBeInTheDocument();
-      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(500);
+      expect(await screen.findByText('訊息2499')).toBeInTheDocument();
+      expect(screen.getByText('訊息1300')).toBeInTheDocument();
+      expect(screen.queryByText('訊息1299')).not.toBeInTheDocument();
+      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(1200);
     });
 
-    it('捲到頂時自動多渲染 500 則更早的訊息，索引維持絕對位置', async () => {
+    it('捲到頂時自動多渲染 1200 則更早的訊息，索引維持絕對位置', async () => {
       mockSubscribeToPttPosts.mockImplementation((_s: unknown, _d: unknown, callback: (posts: PttPush[]) => void) => {
-        callback(makeManyPosts(1200));
+        callback(makeManyPosts(2500));
         return jest.fn();
       });
       mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
 
       render(<PttChatWidget />);
       expandWidget();
-      await screen.findByText('訊息1199');
+      await screen.findByText('訊息2499');
 
       scrollList(screen.getByTestId('ptt-message-list'), { scrollTop: 0, scrollHeight: 20000, clientHeight: 600 });
 
-      expect(await screen.findByText('訊息200')).toBeInTheDocument();
-      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(1000);
-      expect(document.querySelector('[data-push-index="200"]')).toBeInTheDocument();
+      expect(await screen.findByText('訊息100')).toBeInTheDocument();
+      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(2400);
+      expect(document.querySelector('[data-push-index="100"]')).toBeInTheDocument();
     });
 
     it('捲動到中間（未到頂/底）時不會載入更多', async () => {
       mockSubscribeToPttPosts.mockImplementation((_s: unknown, _d: unknown, callback: (posts: PttPush[]) => void) => {
-        callback(makeManyPosts(1200));
+        callback(makeManyPosts(2500));
         return jest.fn();
       });
       mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
 
       render(<PttChatWidget />);
       expandWidget();
-      await screen.findByText('訊息1199');
+      await screen.findByText('訊息2499');
 
       scrollList(screen.getByTestId('ptt-message-list'), { scrollTop: 5000, scrollHeight: 20000, clientHeight: 600 });
 
-      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(500);
+      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(1200);
     });
 
-    it('渲染範圍尚未到最新時，捲到底會自動往後多渲染 500 則', async () => {
+    it('渲染範圍尚未到最新時，捲到底會自動往後多渲染 1200 則', async () => {
       mockGetPttReadState.mockResolvedValue(100);
       mockSubscribeToPttPosts.mockImplementation((_s: unknown, _d: unknown, callback: (posts: PttPush[]) => void) => {
-        callback(makeManyPosts(1200));
+        callback(makeManyPosts(2500));
         return jest.fn();
       });
       mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
@@ -470,19 +470,19 @@ describe('PttChatWidget', () => {
       expandWidget();
       // 已讀位置 100 → 渲染範圍重設為 [50, 550)，最新推文尚未渲染
       await screen.findByText('訊息100');
-      expect(screen.queryByText('訊息1199')).not.toBeInTheDocument();
+      expect(screen.queryByText('訊息2499')).not.toBeInTheDocument();
       expect(document.querySelectorAll('[data-push-index]')).toHaveLength(500);
 
       scrollList(screen.getByTestId('ptt-message-list'), { scrollTop: 19400, scrollHeight: 20000, clientHeight: 600 });
 
-      expect(await screen.findByText('訊息1049')).toBeInTheDocument();
-      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(1000);
+      expect(await screen.findByText('訊息1749')).toBeInTheDocument();
+      expect(document.querySelectorAll('[data-push-index]')).toHaveLength(1700);
     });
 
     it('已讀位置在渲染範圍之前時，會自動往前展開並捲到該則', async () => {
       mockGetPttReadState.mockResolvedValue(100);
       mockSubscribeToPttPosts.mockImplementation((_s: unknown, _d: unknown, callback: (posts: PttPush[]) => void) => {
-        callback(makeManyPosts(1200));
+        callback(makeManyPosts(2500));
         return jest.fn();
       });
       mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
@@ -498,7 +498,7 @@ describe('PttChatWidget', () => {
       scrollIntoViewSpy.mockRestore();
     });
 
-    it('推文不超過 500 則時，捲到頂/底都不會改變渲染範圍', async () => {
+    it('推文不超過 1200 則時，捲到頂/底都不會改變渲染範圍', async () => {
       mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
 
       render(<PttChatWidget />);
@@ -511,6 +511,31 @@ describe('PttChatWidget', () => {
 
       expect(document.querySelectorAll('[data-push-index]')).toHaveLength(samplePosts.length);
     });
+  });
+
+  it('頁面開著跨過換日時間點時，每分鐘重新計算日期並用新日期重新訂閱', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+    mockUseAuth.mockReturnValue({ user: { uid: 'uid-1' } });
+
+    try {
+      render(<PttChatWidget />);
+      await waitFor(() => {
+        expect(mockSubscribeToPttPosts).toHaveBeenCalledWith('intraday', '20260806', expect.any(Function));
+      });
+
+      // 模擬時間走到換日點：之後 getPttSessionDate 回傳新的日期
+      mockGetPttSessionDate.mockReturnValue('20260807');
+      act(() => {
+        jest.advanceTimersByTime(60000);
+      });
+
+      await waitFor(() => {
+        expect(mockSubscribeToPttPosts).toHaveBeenCalledWith('intraday', '20260807', expect.any(Function));
+      });
+      expect(mockGetPttReadState).toHaveBeenCalledWith('uid-1', 'intraday', '20260807');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('切換分頁會用新的 session 重新訂閱', async () => {

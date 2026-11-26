@@ -5,7 +5,7 @@
  * 固定右下角，顯示後端每分鐘爬取的盤中/盤後閒聊推文，並記錄使用者捲動到的已讀位置
  */
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import {
   subscribeToPttPosts,
@@ -19,13 +19,14 @@ import { parsePttContent, extractImageUrls } from '../lib/pttContent';
 import type { PttPush, PttSession } from '../types/pttChat';
 
 const SETTINGS_DEBOUNCE_MS = 10000;
+const DATE_REFRESH_INTERVAL_MS = 60000;
 const DEFAULT_WIDTH_PX = 640;
 const DEFAULT_HEIGHT_PX = 600;
 const MIN_WIDTH_PX = 320;
 const MIN_HEIGHT_PX = 256;
 // 一天的推文可能上萬則，一次渲染會卡頓：預設只渲染最新的 N 則，捲到頂/底時再自動展開更多
-const INITIAL_VISIBLE_COUNT = 500;
-const LOAD_MORE_STEP = 500;
+const INITIAL_VISIBLE_COUNT = 1200;
+const LOAD_MORE_STEP = 1200;
 // 已讀位置在渲染範圍之外時，以該位置為中心重新決定渲染範圍：往前多展開一些上下文，往後渲染一批
 const RESTORE_CONTEXT_BEFORE = 50;
 const RESTORE_CONTEXT_AFTER = 450;
@@ -70,7 +71,14 @@ export default function PttChatWidget() {
   const startIndex = windowStart ?? Math.max(0, posts.length - INITIAL_VISIBLE_COUNT);
   const endIndex = Math.min(windowEnd ?? posts.length, posts.length);
 
-  const dateStr = useMemo(() => getPttSessionDate(session), [session]);
+  // 每分鐘更新「現在時間」，頁面開著跨過換日時間點（盤中 08:30 / 盤後 14:00）時日期才會跟著換
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), DATE_REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  const dateStr = getPttSessionDate(session, now);
   const uid = user?.uid;
 
   // 登入後讀取使用者上次調整過的視窗大小（clamp 回目前螢幕可視範圍，避免換裝置後過大/過小）
