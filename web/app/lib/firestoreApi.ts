@@ -447,9 +447,6 @@ export async function getTodayDailyReport(): Promise<DailyReport | null> {
   return getDailyReport(dateStr);
 }
 
-/** 單一分片寫滿的推文數，必須與後端 apps/functions/ptt_chat.py 的 MAX_POSTS_PER_PART 一致 */
-export const PTT_MAX_POSTS_PER_PART = 5000;
-
 /** PTT 分片文件 ID：第 1 片為 `{date}_{session}`，之後為 `{date}_{session}_p{n}` */
 function getPttPartDocId(baseDocId: string, part: number): string {
   return part <= 1 ? baseDocId : `${baseDocId}_p${part}`;
@@ -458,9 +455,9 @@ function getPttPartDocId(baseDocId: string, part: number): string {
 /**
  * 監聽指定日期與盤別的 PTT Stock 板閒聊訊息
  *
- * 單一文件有 1 MiB 上限，後端會把推文分成多片（見 getPttPartDocId），且一定寫滿
- * PTT_MAX_POSTS_PER_PART 才會換下一片。這裡逐片以單一文件訂閱（不用集合查詢，security rules 只需
- * 評估 get），某一片寫滿就接著訂閱下一片；已寫滿的分片不再變動，每分鐘只會推送最新那一片。
+ * 單一文件有 1 MiB 上限，後端會把推文分成多片（見 getPttPartDocId），換片時在寫滿的那一片標記
+ * `is_full: true`。這裡逐片以單一文件訂閱（不用集合查詢，security rules 只需評估 get），
+ * 看到 `is_full` 就接著訂閱下一片；已寫滿的分片不再變動，每分鐘只會推送最新那一片。
  * 所有已訂閱分片的第一次快照都到齊後才回呼，避免只有前幾片時讓已讀位置還原誤判。
  *
  * @param session 'intraday' (盤中閒聊) | 'afterhours' (盤後閒聊)
@@ -493,15 +490,18 @@ export function subscribeToPttPosts(
 
     const docId = getPttPartDocId(baseDocId, part);
     unsubscribers.set(part, onSnapshot(doc(db, 'pttPosts', docId), (docSnap) => {
-      const posts = (docSnap.data()?.posts as PttPush[] | undefined) || [];
-      partPosts.set(part, posts);
+      const data = docSnap.data();
+      partPosts.set(part, (data?.posts as PttPush[] | undefined) || []);
 
-      if (posts.length >= PTT_MAX_POSTS_PER_PART) {
+      if (data?.is_full === true) {
         listenToPart(part + 1);
       }
       emit();
     }, (error) => {
       console.error(`❌ 監聽 PTT 閒聊訊息失敗 (pttPosts/${docId}):`, error);
+      // 單一分片失敗時視為沒有資料（已收到過則保留），避免其他分片永遠等不到回呼
+      if (!partPosts.has(part)) partPosts.set(part, []);
+      emit();
     }));
   };
 

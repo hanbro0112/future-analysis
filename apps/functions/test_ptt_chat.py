@@ -387,15 +387,17 @@ def test_build_posts_doc_id_first_part_keeps_legacy_id():
 def test_write_new_pushes_writes_to_first_part_when_not_full():
     writer = _make_writer_with_posts({"20260806_intraday": 10})
     crawler = PttChatCrawler(writer)
+    new_pushes = _make_pushes(5, prefix="n")
 
-    part = crawler.write_new_pushes("20260806_intraday", 1, _make_pushes(5))
+    part = crawler.write_new_pushes("20260806_intraday", 1, new_pushes)
 
     assert part == 1
     assert [c["document_id"] for c in writer.write_calls] == ["20260806_intraday"]
+    assert writer.write_calls[0]["data"] == {"posts": firestore.ArrayUnion(new_pushes)}
 
 
-def test_write_new_pushes_splits_across_parts_when_exceeding_limit():
-    """第 1 片只剩 3 則空位時，前 3 則寫第 1 片，其餘寫第 2 片"""
+def test_write_new_pushes_splits_and_marks_full_part():
+    """第 1 片只剩 3 則空位時，前 3 則寫第 1 片並標記 is_full，其餘寫第 2 片"""
     writer = _make_writer_with_posts({"20260806_intraday": ptt_chat.MAX_POSTS_PER_PART - 3})
     crawler = PttChatCrawler(writer)
     new_pushes = _make_pushes(10, prefix="n")
@@ -404,32 +406,59 @@ def test_write_new_pushes_splits_across_parts_when_exceeding_limit():
 
     assert part == 2
     assert [c["document_id"] for c in writer.write_calls] == ["20260806_intraday", "20260806_intraday_p2"]
-    assert writer.write_calls[0]["data"]["posts"] == firestore.ArrayUnion(new_pushes[:3])
-    assert writer.write_calls[1]["data"]["posts"] == firestore.ArrayUnion(new_pushes[3:])
+    assert writer.write_calls[0]["data"] == {"posts": firestore.ArrayUnion(new_pushes[:3]), "is_full": True}
+    assert writer.write_calls[1]["data"] == {"posts": firestore.ArrayUnion(new_pushes[3:])}
 
 
-def test_write_new_pushes_skips_full_legacy_doc_without_part_record():
-    """舊資料沒有 part 欄位（預設 1）且第 1 片已滿，要自動改寫第 2 片"""
-    writer = _make_writer_with_posts({"20260806_intraday": ptt_chat.MAX_POSTS_PER_PART + 460})
+def test_write_new_pushes_marks_full_when_filled_exactly():
+    writer = _make_writer_with_posts({"20260806_intraday": ptt_chat.MAX_POSTS_PER_PART - 2})
     crawler = PttChatCrawler(writer)
 
-    part = crawler.write_new_pushes("20260806_intraday", 1, _make_pushes(2))
+    part = crawler.write_new_pushes("20260806_intraday", 1, _make_pushes(2, prefix="n"))
+
+    assert part == 1
+    assert writer.write_calls[0]["data"]["is_full"] is True
+
+
+def test_write_new_pushes_fills_part_exactly_despite_duplicates():
+    """ArrayUnion 會忽略重複元素，重複的推文不能佔用容量，否則分片寫不滿就換片"""
+    writer = _make_writer_with_posts({"20260806_intraday": ptt_chat.MAX_POSTS_PER_PART - 3})
+    crawler = PttChatCrawler(writer)
+    already_stored = _make_pushes(1)
+    fresh = _make_pushes(4, prefix="n")
+    new_pushes = already_stored + [fresh[0], fresh[0], fresh[1], fresh[2], fresh[3]]
+
+    part = crawler.write_new_pushes("20260806_intraday", 1, new_pushes)
+
+    assert part == 2
+    assert writer.write_calls[0]["data"]["posts"] == firestore.ArrayUnion(fresh[:3])
+    assert writer.write_calls[1]["data"]["posts"] == firestore.ArrayUnion(fresh[3:])
+
+
+def test_write_new_pushes_skips_part_marked_full():
+    writer = FakeFirestoreWriter(
+        FakeDocSnapshot(exists=False),
+        {"20260806_intraday": FakeDocSnapshot(exists=True, data={"posts": _make_pushes(3), "is_full": True})},
+    )
+    crawler = PttChatCrawler(writer)
+
+    part = crawler.write_new_pushes("20260806_intraday", 1, _make_pushes(1, prefix="n"))
 
     assert part == 2
     assert [c["document_id"] for c in writer.write_calls] == ["20260806_intraday_p2"]
 
 
-def test_write_new_pushes_skips_multiple_full_parts():
-    writer = _make_writer_with_posts({
-        "20260806_intraday": ptt_chat.MAX_POSTS_PER_PART,
-        "20260806_intraday_p2": ptt_chat.MAX_POSTS_PER_PART,
-    })
+def test_write_new_pushes_marks_unflagged_full_doc_then_writes_next_part():
+    """分片已達上限但沒有標記時，先補上 is_full 再寫下一片"""
+    writer = _make_writer_with_posts({"20260806_intraday": ptt_chat.MAX_POSTS_PER_PART})
     crawler = PttChatCrawler(writer)
 
-    part = crawler.write_new_pushes("20260806_intraday", 1, _make_pushes(1))
+    part = crawler.write_new_pushes("20260806_intraday", 1, _make_pushes(1, prefix="n"))
 
-    assert part == 3
-    assert writer.write_calls[0]["document_id"] == "20260806_intraday_p3"
+    assert part == 2
+    assert writer.write_calls[0]["document_id"] == "20260806_intraday"
+    assert writer.write_calls[0]["data"] == {"is_full": True}
+    assert writer.write_calls[1]["document_id"] == "20260806_intraday_p2"
 
 
 def test_run_records_part_in_thread_and_resumes_from_it(monkeypatch):

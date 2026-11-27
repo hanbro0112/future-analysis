@@ -40,7 +40,7 @@ pttThreads/{session}
 
 pttPosts/{date}_{session}          # 第 1 片
 pttPosts/{date}_{session}_p{n}     # 第 n 片（n >= 2）
-  { posts: [ { userid, content, push_tag, time }, ... ], updated_at }
+  { posts: [ { userid, content, push_tag, time }, ... ], is_full?: boolean, updated_at }
 
 users/{uid}/setting/pttReadState
   {
@@ -62,10 +62,11 @@ users/{uid}/setting/pttReadState
   `intraday.last_read_index`）做局部更新，彼此不會互相覆蓋，捲動位置與拖曳調整視窗大小都是
   「停止操作 10 秒後才寫入」的 debounce
 - `pttPosts` 才是實際聊天內容，依日期各自保留歷史，推文存在 `posts` 陣列（用 `ArrayUnion` 附加）
-- Firestore 單一文件上限 1 MiB（每則推文約 190 bytes），所以 `pttPosts` 會**分片**：
-  每片最多 `MAX_POSTS_PER_PART`（5000）則，寫滿才換下一片 `_p{n}`；`pttThreads.part` 記錄目前寫到第幾片，
-  寫入前還會讀取目前分片的實際筆數，已滿（含舊資料尚未有 `part` 欄位）就自動往後找第一個未滿的分片
-- 前端逐片以單一文件訂閱（第 1 片寫滿 5000 則才接著訂閱下一片，前端常數 `PTT_MAX_POSTS_PER_PART` 需與後端一致），依序串接成同一個陣列，
+- Firestore 單一文件上限 1 MiB（實測每則推文平均約 90 bytes），所以 `pttPosts` 會**分片**：
+  每片最多 `MAX_POSTS_PER_PART`（8000）則（約 720 KB；只以則數控制，平均每則超過約 131 bytes 才會超過文件上限）；
+  寫入前會排除分片已有與本批次重複的推文（`ArrayUnion` 會忽略它們），讓分片確實寫滿。
+  寫滿或換片時在該片標記 `is_full: true`；`pttThreads.part` 記錄目前寫到第幾片
+- 前端逐片以單一文件訂閱（看到 `is_full` 才接著訂閱下一片），依序串接成同一個陣列，
   `last_read_index` 沿用串接後的絕對索引；已寫滿的分片不再變動，每分鐘只會推送最新那一片
 - 前端為避免一次渲染上萬則造成卡頓，預設只渲染最新 1200 則，捲到頂會自動往前多渲染 1200 則；已讀位置在渲染範圍之外時，以該位置為中心重設範圍，捲到底再自動往後多渲染 1200 則
 
@@ -78,13 +79,13 @@ users/{uid}/setting/pttReadState
 3. 抓文章頁推文，用 `last_fingerprint` 找出新增的部分
    （指紋在畫面上找不到代表被 PTT 隱藏吃掉了，視為全部新增並記警告 log；
    這時會先比對所有分片已存在的推文，只寫入尚未存在的，避免開頭那段舊推文被重複寫進新分片尾端）
-4. 用 `ArrayUnion` 依序填入 `pttPosts` 分片（寫滿 5000 則換下一片），並更新 `pttThreads.last_fingerprint` 與 `part`
+4. 用 `ArrayUnion` 依序填入 `pttPosts` 分片（寫滿換下一片並標記 `is_full`），並更新 `pttThreads.last_fingerprint` 與 `part`
 
 ## 已知限制
 
 - PTT 網頁版推文數過多時會隱藏中段內容（畫面上會出現「檔案過大！部分文章無法顯示」），
   爬蟲已排除這個提示區塊，但代表無法保證 100% 完整抓到，極端爆量時段中間可能會漏接
-- `MAX_POSTS_PER_PART` 以筆數估算大小，若單則推文內容異常長（例如貼大量文字）仍有極小機率讓單片超過 1 MiB
+- 沒有 `is_full` 欄位的舊分片，前端不會讀取其下一片（舊資料不回補）
 - 沒有國定假日日曆，國定假日當天仍會被當成平日去嘗試解析盤中/盤後閒聊文章
 - 板面翻頁最多找 4 頁（`MAX_INDEX_PAGES_TO_SEARCH`），文章若在被爬蟲鎖定前就洗出這個範圍
   （板面流量極大、文章遲遲沒發文），仍然會找不到並持續跳過

@@ -25,6 +25,11 @@ class Push(TypedDict):
     time: str
 
 
+class PostsPart(TypedDict):
+    posts: list[Push]
+    is_full: bool
+
+
 BOARD_INDEX_URL = "https://www.ptt.cc/bbs/Stock/index.html"
 BOARD_BASE_URL = "https://www.ptt.cc"
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; FuturesAnalysisBot/1.0)"}
@@ -40,13 +45,19 @@ SESSION_TITLE_KEYWORD: dict[Session, str] = {
 CASH_MARKET_OPEN_MINUTES = 8 * 60 + 30  # 08:30，盤中閒聊開始
 CASH_MARKET_CLOSE_MINUTES = 14 * 60  # 14:00，盤後閒聊開始
 
-# Firestore 單一文件上限 1 MiB，每則推文約 190 bytes，單一分片寫滿 5000 則（約 1 MB 以下留緩衝）再換下一片
-MAX_POSTS_PER_PART = 5000
+# Firestore 單一文件上限 1 MiB (1,048,576 bytes)，實測每則推文平均約 90 bytes，
+# 單一分片寫滿 8000 則（約 720 KB，平均超過約 131 bytes 才會超限）再換下一片
+MAX_POSTS_PER_PART = 8000
 
 
 def build_posts_doc_id(base_doc_id: str, part: int) -> str:
     """第 1 片沿用 `{date}_{session}`，之後為 `{date}_{session}_p{n}`"""
     return base_doc_id if part <= 1 else f"{base_doc_id}_p{part}"
+
+
+def _push_identity(push: Push) -> tuple[str, str, str, str]:
+    """`ArrayUnion` 判定「相同元素」的依據：所有欄位完全相同"""
+    return push["push_tag"], push["userid"], push["content"], push["time"]
 
 
 def _last_trading_day(date: datetime) -> datetime:
@@ -219,16 +230,11 @@ class PttChatCrawler:
         print(f"⚠️  找不到上次記錄的推文指紋（可能已被 PTT 隱藏），視為全部新增: {last_fingerprint}")
         return pushes
 
-    def _read_posts(self, doc_id: str) -> list[Push]:
-        """讀取指定 pttPosts 分片目前已有的推文，文件不存在回傳空列表"""
+    def _read_part(self, doc_id: str) -> PostsPart:
+        """讀取指定 pttPosts 分片，文件不存在回傳空內容"""
         snapshot = self.firestore_writer.db.collection("pttPosts").document(doc_id).get()
-        if not snapshot.exists:
-            return []
-        return (snapshot.to_dict() or {}).get("posts") or []
-
-    def _count_posts(self, doc_id: str) -> int:
-        """讀取指定 pttPosts 分片目前已有幾則推文，文件不存在回傳 0"""
-        return len(self._read_posts(doc_id))
+        data = (snapshot.to_dict() or {}) if snapshot.exists else {}
+        return {"posts": data.get("posts") or [], "is_full": data.get("is_full") is True}
 
     def drop_stored_pushes(self, base_doc_id: str, pushes: list[Push]) -> list[Push]:
         """
@@ -241,7 +247,7 @@ class PttChatCrawler:
         stored_fingerprints: set[str] = set()
         part = 1
         while True:
-            stored = self._read_posts(build_posts_doc_id(base_doc_id, part))
+            stored = self._read_part(build_posts_doc_id(base_doc_id, part))["posts"]
             if not stored:
                 break
             stored_fingerprints.update(self.compute_fingerprint(push) for push in stored)
@@ -249,9 +255,42 @@ class PttChatCrawler:
 
         return [push for push in pushes if self.compute_fingerprint(push) not in stored_fingerprints]
 
+    @staticmethod
+    def split_for_part(stored: list[Push], pushes: list[Push]) -> tuple[list[Push], list[Push]]:
+        """
+        從 pushes 切出目前分片裝得下的部分
+
+        `ArrayUnion` 會忽略完全相同的元素，所以先排除分片已有的與本批次內重複的推文，
+        只用真正會新增的推文計算容量，分片才能確實寫滿
+
+        Args:
+            stored: 目前分片已有的推文
+            pushes: 待寫入的推文
+
+        Returns:
+            (要寫入此分片的推文, 因分片已滿而需寫到下一片的推文)
+        """
+        seen = {_push_identity(push) for push in stored}
+        count = len(stored)
+        chunk: list[Push] = []
+
+        for index, push in enumerate(pushes):
+            identity = _push_identity(push)
+            if identity in seen:
+                continue
+            if count >= MAX_POSTS_PER_PART:
+                return chunk, pushes[index:]
+            seen.add(identity)
+            chunk.append(push)
+            count += 1
+
+        return chunk, []
+
     def write_new_pushes(self, base_doc_id: str, start_part: int, new_pushes: list[Push]) -> int:
         """
         將新推文依序填入分片，每片最多 MAX_POSTS_PER_PART 則，寫滿才換下一片
+
+        寫滿的分片會標記 `is_full: true`，前端看到標記才訂閱下一片
 
         Args:
             base_doc_id: `{date}_{session}`
@@ -262,25 +301,28 @@ class PttChatCrawler:
             最後寫入（或目前可繼續寫入）的分片編號
         """
         part = start_part
-        count = self._count_posts(build_posts_doc_id(base_doc_id, part))
-        # 目前分片已滿（含舊資料尚未記錄 part 的情況）就往後找第一個未滿的分片
-        while count >= MAX_POSTS_PER_PART:
-            part += 1
-            count = self._count_posts(build_posts_doc_id(base_doc_id, part))
-
         remaining = new_pushes
         while remaining:
-            capacity = MAX_POSTS_PER_PART - count
-            chunk, remaining = remaining[:capacity], remaining[capacity:]
-            self.firestore_writer.write_document(
-                collection="pttPosts",
-                document_id=build_posts_doc_id(base_doc_id, part),
-                data={"posts": firestore.ArrayUnion(chunk)},
-                merge=True,
-            )
+            doc_id = build_posts_doc_id(base_doc_id, part)
+            current = self._read_part(doc_id)
+            if current["is_full"]:
+                part += 1
+                continue
+
+            chunk, remaining = self.split_for_part(current["posts"], remaining)
+            is_full = bool(remaining) or len(current["posts"]) + len(chunk) >= MAX_POSTS_PER_PART
+
+            data: dict[str, object] = {}
+            if chunk:
+                data["posts"] = firestore.ArrayUnion(chunk)
+            if is_full:
+                data["is_full"] = True
+            if data:
+                self.firestore_writer.write_document(
+                    collection="pttPosts", document_id=doc_id, data=data, merge=True
+                )
             if remaining:
                 part += 1
-                count = 0
         return part
 
     def run(self, now: Optional[datetime] = None) -> str:

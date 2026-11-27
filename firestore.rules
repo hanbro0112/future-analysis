@@ -24,7 +24,7 @@ service cloud.firestore {
       allow read: if isAuthenticated() && isRecentDate(date);
     }
 
-    // PTT Stock 板盤中/盤後閒聊：pttPosts/{date}_{session}（超過 5000 則會分片為 {date}_{session}_p{n}）
+    // PTT Stock 板盤中/盤後閒聊：pttPosts/{date}_{session}（超過 8000 則會分片為 {date}_{session}_p{n}）
     // 文件 ID 前 8 碼為日期；前端不讀 pttThreads（僅後端 Admin SDK 使用，不開放讀取）
     match /pttPosts/{docId} {
       allow read: if isAuthenticated() && isRecentDate(docId[0:8]);

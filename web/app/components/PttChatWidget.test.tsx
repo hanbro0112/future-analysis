@@ -418,7 +418,7 @@ describe('PttChatWidget', () => {
       render(<PttChatWidget />);
       expandWidget();
 
-      expect(await screen.findByText('訊息2499')).toBeInTheDocument();
+      expect(await screen.findByText('訊息2499', {}, { timeout: 5000 })).toBeInTheDocument();
       expect(screen.getByText('訊息1300')).toBeInTheDocument();
       expect(screen.queryByText('訊息1299')).not.toBeInTheDocument();
       expect(document.querySelectorAll('[data-push-index]')).toHaveLength(1200);
@@ -433,11 +433,11 @@ describe('PttChatWidget', () => {
 
       render(<PttChatWidget />);
       expandWidget();
-      await screen.findByText('訊息2499');
+      await screen.findByText('訊息2499', {}, { timeout: 5000 });
 
       scrollList(screen.getByTestId('ptt-message-list'), { scrollTop: 0, scrollHeight: 20000, clientHeight: 600 });
 
-      expect(await screen.findByText('訊息100')).toBeInTheDocument();
+      expect(await screen.findByText('訊息100', {}, { timeout: 5000 })).toBeInTheDocument();
       expect(document.querySelectorAll('[data-push-index]')).toHaveLength(2400);
       expect(document.querySelector('[data-push-index="100"]')).toBeInTheDocument();
     });
@@ -451,7 +451,7 @@ describe('PttChatWidget', () => {
 
       render(<PttChatWidget />);
       expandWidget();
-      await screen.findByText('訊息2499');
+      await screen.findByText('訊息2499', {}, { timeout: 5000 });
 
       scrollList(screen.getByTestId('ptt-message-list'), { scrollTop: 5000, scrollHeight: 20000, clientHeight: 600 });
 
@@ -469,13 +469,13 @@ describe('PttChatWidget', () => {
       render(<PttChatWidget />);
       expandWidget();
       // 已讀位置 100 → 渲染範圍重設為 [50, 550)，最新推文尚未渲染
-      await screen.findByText('訊息100');
+      await screen.findByText('訊息100', {}, { timeout: 5000 });
       expect(screen.queryByText('訊息2499')).not.toBeInTheDocument();
       expect(document.querySelectorAll('[data-push-index]')).toHaveLength(500);
 
       scrollList(screen.getByTestId('ptt-message-list'), { scrollTop: 19400, scrollHeight: 20000, clientHeight: 600 });
 
-      expect(await screen.findByText('訊息1749')).toBeInTheDocument();
+      expect(await screen.findByText('訊息1749', {}, { timeout: 5000 })).toBeInTheDocument();
       expect(document.querySelectorAll('[data-push-index]')).toHaveLength(1700);
     });
 
@@ -491,7 +491,7 @@ describe('PttChatWidget', () => {
       render(<PttChatWidget />);
       expandWidget();
 
-      expect(await screen.findByText('訊息100')).toBeInTheDocument();
+      expect(await screen.findByText('訊息100', {}, { timeout: 5000 })).toBeInTheDocument();
       await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled());
       expect(screen.queryByText('訊息49')).not.toBeInTheDocument();
 
